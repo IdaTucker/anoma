@@ -27,7 +27,7 @@ use super::{
     Unbonds, ValidatorConsensusKeys, ValidatorSets, ValidatorTotalDeltas,
 };
 use crate::ledger::governance::vp::is_proposal_accepted;
-use crate::ledger::native_vp::{self, Ctx, NativeVp};
+use crate::ledger::native_vp::{self, Ctx, NativeVp, VpEnv};
 use crate::ledger::pos::{
     is_validator_address_raw_hash_key, is_validator_consensus_key_key,
     is_validator_state_key,
@@ -137,18 +137,18 @@ where
                     return Ok(false);
                 }
             } else if is_validator_set_key(key) {
-                let pre = self.ctx.read_pre(key)?.and_then(|bytes| {
+                let pre = self.ctx.read_bytes_pre(key)?.and_then(|bytes| {
                     ValidatorSets::try_from_slice(&bytes[..]).ok()
                 });
-                let post = self.ctx.read_post(key)?.and_then(|bytes| {
+                let post = self.ctx.read_bytes_post(key)?.and_then(|bytes| {
                     ValidatorSets::try_from_slice(&bytes[..]).ok()
                 });
                 changes.push(ValidatorSet(Data { pre, post }));
             } else if let Some(validator) = is_validator_state_key(key) {
-                let pre = self.ctx.read_pre(key)?.and_then(|bytes| {
+                let pre = self.ctx.read_bytes_pre(key)?.and_then(|bytes| {
                     ValidatorStates::try_from_slice(&bytes[..]).ok()
                 });
-                let post = self.ctx.read_post(key)?.and_then(|bytes| {
+                let post = self.ctx.read_bytes_post(key)?.and_then(|bytes| {
                     ValidatorStates::try_from_slice(&bytes[..]).ok()
                 });
                 changes.push(Validator {
@@ -160,11 +160,11 @@ where
             {
                 let pre = self
                     .ctx
-                    .read_pre(key)?
+                    .read_bytes_pre(key)?
                     .and_then(|bytes| Address::try_from_slice(&bytes[..]).ok());
                 let post = self
                     .ctx
-                    .read_post(key)?
+                    .read_bytes_post(key)?
                     .and_then(|bytes| Address::try_from_slice(&bytes[..]).ok());
                 changes.push(Validator {
                     address: validator.clone(),
@@ -172,10 +172,10 @@ where
                 });
             } else if let Some(validator) = is_validator_consensus_key_key(key)
             {
-                let pre = self.ctx.read_pre(key)?.and_then(|bytes| {
+                let pre = self.ctx.read_bytes_pre(key)?.and_then(|bytes| {
                     ValidatorConsensusKeys::try_from_slice(&bytes[..]).ok()
                 });
-                let post = self.ctx.read_post(key)?.and_then(|bytes| {
+                let post = self.ctx.read_bytes_post(key)?.and_then(|bytes| {
                     ValidatorConsensusKeys::try_from_slice(&bytes[..]).ok()
                 });
                 changes.push(Validator {
@@ -183,10 +183,10 @@ where
                     update: ConsensusKey(Data { pre, post }),
                 });
             } else if let Some(validator) = is_validator_total_deltas_key(key) {
-                let pre = self.ctx.read_pre(key)?.and_then(|bytes| {
+                let pre = self.ctx.read_bytes_pre(key)?.and_then(|bytes| {
                     ValidatorTotalDeltas::try_from_slice(&bytes[..]).ok()
                 });
-                let post = self.ctx.read_post(key)?.and_then(|bytes| {
+                let post = self.ctx.read_bytes_post(key)?.and_then(|bytes| {
                     ValidatorTotalDeltas::try_from_slice(&bytes[..]).ok()
                 });
                 changes.push(Validator {
@@ -194,10 +194,10 @@ where
                     update: TotalDeltas(Data { pre, post }),
                 });
             } else if let Some(validator) = is_validator_voting_power_key(key) {
-                let pre = self.ctx.read_pre(key)?.and_then(|bytes| {
+                let pre = self.ctx.read_bytes_pre(key)?.and_then(|bytes| {
                     ValidatorVotingPowers::try_from_slice(&bytes[..]).ok()
                 });
-                let post = self.ctx.read_post(key)?.and_then(|bytes| {
+                let post = self.ctx.read_bytes_post(key)?.and_then(|bytes| {
                     ValidatorVotingPowers::try_from_slice(&bytes[..]).ok()
                 });
                 changes.push(Validator {
@@ -209,11 +209,11 @@ where
             {
                 let pre = self
                     .ctx
-                    .read_pre(key)?
+                    .read_bytes_pre(key)?
                     .and_then(|bytes| Address::try_from_slice(&bytes[..]).ok());
                 let post = self
                     .ctx
-                    .read_post(key)?
+                    .read_bytes_post(key)?
                     .and_then(|bytes| Address::try_from_slice(&bytes[..]).ok());
                 // Find the raw hashes of the addresses
                 let pre = pre.map(|pre| {
@@ -236,26 +236,26 @@ where
                 if owner != &addr {
                     continue;
                 }
-                let pre = self.ctx.read_pre(key)?.and_then(|bytes| {
+                let pre = self.ctx.read_bytes_pre(key)?.and_then(|bytes| {
                     token::Amount::try_from_slice(&bytes[..]).ok()
                 });
-                let post = self.ctx.read_post(key)?.and_then(|bytes| {
+                let post = self.ctx.read_bytes_post(key)?.and_then(|bytes| {
                     token::Amount::try_from_slice(&bytes[..]).ok()
                 });
                 changes.push(Balance(Data { pre, post }));
             } else if let Some(bond_id) = is_bond_key(key) {
                 let pre = self
                     .ctx
-                    .read_pre(key)?
+                    .read_bytes_pre(key)?
                     .and_then(|bytes| Bonds::try_from_slice(&bytes[..]).ok());
                 let post = self
                     .ctx
-                    .read_post(key)?
+                    .read_bytes_post(key)?
                     .and_then(|bytes| Bonds::try_from_slice(&bytes[..]).ok());
                 // For bonds, we need to look-up slashes
                 let slashes = self
                     .ctx
-                    .read_pre(&validator_slashes_key(&bond_id.validator))?
+                    .read_bytes_pre(&validator_slashes_key(&bond_id.validator))?
                     .and_then(|bytes| Slashes::try_from_slice(&bytes[..]).ok())
                     .unwrap_or_default();
                 changes.push(Bond {
@@ -266,16 +266,18 @@ where
             } else if let Some(unbond_id) = is_unbond_key(key) {
                 let pre = self
                     .ctx
-                    .read_pre(key)?
+                    .read_bytes_pre(key)?
                     .and_then(|bytes| Unbonds::try_from_slice(&bytes[..]).ok());
                 let post = self
                     .ctx
-                    .read_post(key)?
+                    .read_bytes_post(key)?
                     .and_then(|bytes| Unbonds::try_from_slice(&bytes[..]).ok());
                 // For unbonds, we need to look-up slashes
                 let slashes = self
                     .ctx
-                    .read_pre(&validator_slashes_key(&unbond_id.validator))?
+                    .read_bytes_pre(&validator_slashes_key(
+                        &unbond_id.validator,
+                    ))?
                     .and_then(|bytes| Slashes::try_from_slice(&bytes[..]).ok())
                     .unwrap_or_default();
                 changes.push(Unbond {
@@ -284,10 +286,10 @@ where
                     slashes,
                 });
             } else if is_total_voting_power_key(key) {
-                let pre = self.ctx.read_pre(key)?.and_then(|bytes| {
+                let pre = self.ctx.read_bytes_pre(key)?.and_then(|bytes| {
                     TotalVotingPowers::try_from_slice(&bytes[..]).ok()
                 });
-                let post = self.ctx.read_post(key)?.and_then(|bytes| {
+                let post = self.ctx.read_bytes_post(key)?.and_then(|bytes| {
                     TotalVotingPowers::try_from_slice(&bytes[..]).ok()
                 });
                 changes.push(TotalVotingPower(Data { pre, post }));
@@ -333,7 +335,7 @@ where
     }
 
     fn read_pos_params(&self) -> PosParams {
-        let value = self.ctx.read_pre(&params_key()).unwrap().unwrap();
+        let value = self.ctx.read_bytes_pre(&params_key()).unwrap().unwrap();
         decode(value).unwrap()
     }
 
@@ -343,7 +345,7 @@ where
     ) -> Option<Self::Address> {
         let value = self
             .ctx
-            .read_pre(&validator_staking_reward_address_key(key))
+            .read_bytes_pre(&validator_staking_reward_address_key(key))
             .unwrap();
         value.map(|value| decode(value).unwrap())
     }
@@ -354,7 +356,7 @@ where
     ) -> Option<ValidatorConsensusKeys> {
         let value = self
             .ctx
-            .read_pre(&validator_consensus_key_key(key))
+            .read_bytes_pre(&validator_consensus_key_key(key))
             .unwrap();
         value.map(|value| decode(value).unwrap())
     }
@@ -363,7 +365,7 @@ where
         &self,
         key: &Self::Address,
     ) -> Option<ValidatorStates> {
-        let value = self.ctx.read_pre(&validator_state_key(key)).unwrap();
+        let value = self.ctx.read_bytes_pre(&validator_state_key(key)).unwrap();
         value.map(|value| decode(value).unwrap())
     }
 
@@ -371,8 +373,10 @@ where
         &self,
         key: &Self::Address,
     ) -> Option<ValidatorTotalDeltas> {
-        let value =
-            self.ctx.read_pre(&validator_total_deltas_key(key)).unwrap();
+        let value = self
+            .ctx
+            .read_bytes_pre(&validator_total_deltas_key(key))
+            .unwrap();
         value.map(|value| decode(value).unwrap())
     }
 
@@ -380,37 +384,46 @@ where
         &self,
         key: &Self::Address,
     ) -> Option<ValidatorVotingPowers> {
-        let value =
-            self.ctx.read_pre(&validator_voting_power_key(key)).unwrap();
+        let value = self
+            .ctx
+            .read_bytes_pre(&validator_voting_power_key(key))
+            .unwrap();
         value.map(|value| decode(value).unwrap())
     }
 
     fn read_validator_slashes(&self, key: &Self::Address) -> Vec<types::Slash> {
-        let value = self.ctx.read_pre(&validator_slashes_key(key)).unwrap();
+        let value = self
+            .ctx
+            .read_bytes_pre(&validator_slashes_key(key))
+            .unwrap();
         value
             .map(|value| decode(value).unwrap())
             .unwrap_or_default()
     }
 
     fn read_bond(&self, key: &BondId) -> Option<Bonds> {
-        let value = self.ctx.read_pre(&bond_key(key)).unwrap();
+        let value = self.ctx.read_bytes_pre(&bond_key(key)).unwrap();
         value.map(|value| decode(value).unwrap())
     }
 
     fn read_unbond(&self, key: &BondId) -> Option<Unbonds> {
-        let value = self.ctx.read_pre(&unbond_key(key)).unwrap();
+        let value = self.ctx.read_bytes_pre(&unbond_key(key)).unwrap();
         value.map(|value| decode(value).unwrap())
     }
 
     fn read_validator_set(&self) -> ValidatorSets {
-        let value = self.ctx.read_pre(&validator_set_key()).unwrap().unwrap();
+        let value = self
+            .ctx
+            .read_bytes_pre(&validator_set_key())
+            .unwrap()
+            .unwrap();
         decode(value).unwrap()
     }
 
     fn read_total_voting_power(&self) -> TotalVotingPowers {
         let value = self
             .ctx
-            .read_pre(&total_voting_power_key())
+            .read_bytes_pre(&total_voting_power_key())
             .unwrap()
             .unwrap();
         decode(value).unwrap()
