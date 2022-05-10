@@ -358,17 +358,217 @@ pub mod tx {
 /// Validity predicate environment imports
 pub mod vp {
     use core::slice;
-    use std::convert::TryFrom;
+    use std::convert::{Infallible, TryFrom};
     use std::marker::PhantomData;
 
+    pub use anoma::ledger::vp_env::VpEnv;
     use anoma::types::chain::CHAIN_ID_LENGTH;
     use anoma::types::hash::{Hash, HASH_LENGTH};
     use anoma::types::internal::HostEnvResult;
     use anoma::types::key::*;
     use anoma::types::storage::{
-        BlockHash, BlockHeight, Epoch, BLOCK_HASH_LENGTH,
+        self, BlockHash, BlockHeight, Epoch, BLOCK_HASH_LENGTH,
     };
     pub use borsh::{BorshDeserialize, BorshSerialize};
+
+    pub struct Ctx(());
+
+    impl Ctx {
+        /// Create a host context. The context on WASM side is only provided by
+        /// the VM once its being executed (in here it's implicit). But
+        /// because we want to have interface identical with the native
+        /// VPs, in which the context is explicit, in here we're just
+        /// using an empty `Ctx` to "fake" it.
+        ///
+        /// # Safety
+        ///
+        /// When using `#[validity_predicate]` macro from `anoma_macros`,
+        /// the constructor should not be called from transactions and validity
+        /// predicates implementation directly - they receive `&Self` as
+        /// an argument provided by the macro that wrap the low-level WASM
+        /// interface with Rust native types.
+        ///
+        /// Otherwise, this should only be called once to initialize this "fake"
+        /// context in order to benefit from type-safety of the host environment
+        /// methods implemented on the context.
+        #[allow(clippy::new_without_default)]
+        pub unsafe fn new() -> Self {
+            Self(())
+        }
+    }
+
+    pub type EnvResult<T> = Result<T, <Ctx as VpEnv>::Error>;
+    pub type VpResult = EnvResult<bool>;
+
+    pub fn accept() -> VpResult {
+        Ok(true)
+    }
+
+    pub fn reject() -> VpResult {
+        Ok(false)
+    }
+
+    impl VpEnv for Ctx {
+        // Change with care, this is assumed to be `Infallible` by
+        // `anoma_macros::validity_predicate` macro.
+        type Error = Infallible;
+        // TODO there's no pre/post in native VP yet?
+        type PrefixIter = std::vec::IntoIter<(String, Vec<u8>, u64)>;
+
+        fn read_pre<T: BorshDeserialize>(
+            &self,
+            key: &storage::Key,
+        ) -> Result<Option<T>, Self::Error> {
+            let key = key.to_string();
+            let read_result =
+                unsafe { anoma_vp_read_pre(key.as_ptr() as _, key.len() as _) };
+            Ok(super::read_from_buffer(read_result, anoma_vp_result_buffer)
+                .and_then(|bytes| T::try_from_slice(&bytes[..]).ok()))
+        }
+
+        fn read_bytes_pre(
+            &self,
+            key: &storage::Key,
+        ) -> Result<Option<Vec<u8>>, Self::Error> {
+            let key = key.to_string();
+            let read_result =
+                unsafe { anoma_vp_read_pre(key.as_ptr() as _, key.len() as _) };
+            Ok(super::read_from_buffer(read_result, anoma_vp_result_buffer))
+        }
+
+        fn read_post<T: BorshDeserialize>(
+            &self,
+            key: &storage::Key,
+        ) -> Result<Option<T>, Self::Error> {
+            let key = key.to_string();
+            let read_result = unsafe {
+                anoma_vp_read_post(key.as_ptr() as _, key.len() as _)
+            };
+            Ok(super::read_from_buffer(read_result, anoma_vp_result_buffer)
+                .and_then(|bytes| T::try_from_slice(&bytes[..]).ok()))
+        }
+
+        fn read_bytes_post(
+            &self,
+            key: &storage::Key,
+        ) -> Result<Option<Vec<u8>>, Self::Error> {
+            let key = key.to_string();
+            let read_result = unsafe {
+                anoma_vp_read_post(key.as_ptr() as _, key.len() as _)
+            };
+            Ok(super::read_from_buffer(read_result, anoma_vp_result_buffer))
+        }
+
+        fn read_temp<T: BorshDeserialize>(
+            &self,
+            key: &storage::Key,
+        ) -> Result<Option<T>, Self::Error> {
+            let key = key.to_string();
+            let read_result = unsafe {
+                anoma_vp_read_temp(key.as_ptr() as _, key.len() as _)
+            };
+            Ok(super::read_from_buffer(read_result, anoma_vp_result_buffer)
+                .and_then(|t| T::try_from_slice(&t[..]).ok()))
+        }
+
+        fn read_bytes_temp(
+            &self,
+            key: &storage::Key,
+        ) -> Result<Option<Vec<u8>>, Self::Error> {
+            let key = key.to_string();
+            let read_result = unsafe {
+                anoma_vp_read_temp(key.as_ptr() as _, key.len() as _)
+            };
+            Ok(super::read_from_buffer(read_result, anoma_vp_result_buffer))
+        }
+
+        fn has_key_pre(&self, key: &storage::Key) -> Result<bool, Self::Error> {
+            let key = key.to_string();
+            let found = unsafe {
+                anoma_vp_has_key_pre(key.as_ptr() as _, key.len() as _)
+            };
+            Ok(HostEnvResult::is_success(found))
+        }
+
+        fn has_key_post(
+            &self,
+            key: &storage::Key,
+        ) -> Result<bool, Self::Error> {
+            let key = key.to_string();
+            let found = unsafe {
+                anoma_vp_has_key_post(key.as_ptr() as _, key.len() as _)
+            };
+            Ok(HostEnvResult::is_success(found))
+        }
+
+        fn get_chain_id(&self) -> Result<String, Self::Error> {
+            let result = Vec::with_capacity(CHAIN_ID_LENGTH);
+            unsafe {
+                anoma_vp_get_chain_id(result.as_ptr() as _);
+            }
+            let slice = unsafe {
+                slice::from_raw_parts(result.as_ptr(), CHAIN_ID_LENGTH)
+            };
+            Ok(String::from_utf8(slice.to_vec())
+                .expect("Cannot convert the ID string"))
+        }
+
+        fn get_block_height(&self) -> Result<BlockHeight, Self::Error> {
+            Ok(BlockHeight(unsafe { anoma_vp_get_block_height() }))
+        }
+
+        fn get_block_hash(&self) -> Result<BlockHash, Self::Error> {
+            let result = Vec::with_capacity(BLOCK_HASH_LENGTH);
+            unsafe {
+                anoma_vp_get_block_hash(result.as_ptr() as _);
+            }
+            let slice = unsafe {
+                slice::from_raw_parts(result.as_ptr(), BLOCK_HASH_LENGTH)
+            };
+            Ok(BlockHash::try_from(slice).expect("Cannot convert the hash"))
+        }
+
+        fn get_block_epoch(&self) -> Result<Epoch, Self::Error> {
+            Ok(Epoch(unsafe { anoma_vp_get_block_epoch() }))
+        }
+
+        fn iter_prefix(
+            &self,
+            prefix: &storage::Key,
+        ) -> Result<Self::PrefixIter, Self::Error> {
+            todo!()
+        }
+
+        fn iter_pre_next(
+            &self,
+            iter: &mut Self::PrefixIter,
+        ) -> Result<Option<(String, Vec<u8>)>, Self::Error> {
+            todo!()
+        }
+
+        fn iter_post_next(
+            &self,
+            iter: &mut Self::PrefixIter,
+        ) -> Result<Option<(String, Vec<u8>)>, Self::Error> {
+            todo!()
+        }
+
+        fn eval(
+            &mut self,
+            vp_code: Vec<u8>,
+            input_data: Vec<u8>,
+        ) -> Result<bool, Self::Error> {
+            let result = unsafe {
+                anoma_vp_eval(
+                    vp_code.as_ptr() as _,
+                    vp_code.len() as _,
+                    input_data.as_ptr() as _,
+                    input_data.len() as _,
+                )
+            };
+            Ok(HostEnvResult::is_success(result))
+        }
+    }
 
     pub struct PreKeyValIterator<T>(pub u64, pub PhantomData<T>);
 
