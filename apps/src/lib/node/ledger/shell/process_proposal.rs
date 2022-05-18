@@ -9,6 +9,8 @@ use tendermint_proto::abci::{
 #[cfg(feature = "ABCI")]
 use tendermint_proto_abci::abci::RequestDeliverTx;
 
+use anoma::types::transaction::protocol::ProtocolTxType;
+
 use super::*;
 
 impl<D, H> Shell<D, H>
@@ -98,11 +100,19 @@ where
                            are not supported"
                         .into(),
                 },
-                TxType::Protocol(_) => TxResult {
-                    code: ErrorCodes::InvalidTx.into(),
-                    info: "Protocol transactions are a fun new feature that \
-                           is coming soon to a blockchain near you. Patience."
-                        .into(),
+                TxType::Protocol(protocol_tx) => match protocol_tx.tx {
+                    ProtocolTxType::EthereumBridgeUpdate(_) => TxResult {
+                        code: ErrorCodes::Ok.into(),
+                        info: "This transaction relates to the Ethereum bridge"
+                            .into(),
+                    },
+                    _ => TxResult {
+                        code: ErrorCodes::InvalidTx.into(),
+                        info: "Protocol transactions are a fun new feature \
+                               that is coming soon to a blockchain near you. \
+                               Patience."
+                            .into(),
+                    },
                 },
                 TxType::Decrypted(tx) => match self.next_wrapper() {
                     Some(wrapper) => {
