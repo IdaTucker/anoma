@@ -4,33 +4,36 @@ use anoma_vp_prelude::*;
 
 #[validity_predicate]
 fn validate_tx(
+    ctx: &Ctx,
     tx_data: Vec<u8>,
     addr: Address,
     keys_changed: BTreeSet<storage::Key>,
     verifiers: BTreeSet<Address>,
-) -> bool {
+) -> VpResult {
     log_string(format!(
         "validate_tx called with token addr: {}, key_changed: {:#?}, \
          verifiers: {:?}",
         addr, keys_changed, verifiers
     ));
 
-    if !is_tx_whitelisted() {
-        return false;
+    if !is_tx_whitelisted(ctx)? {
+        return reject();
     }
 
-    let vp_check =
-        keys_changed
-            .iter()
-            .all(|key| match key.is_validity_predicate() {
-                Some(_) => {
-                    let vp: Vec<u8> = read_bytes_post(key.to_string()).unwrap();
-                    is_vp_whitelisted(&vp)
+    let vp_check = keys_changed.iter().all(|key| {
+        if key.is_validity_predicate().is_some() {
+            match ctx.read_bytes_post(key) {
+                Ok(Some(vp)) => {
+                    matches!(is_vp_whitelisted(ctx, &vp), Ok(true))
                 }
-                None => true,
-            });
+                _ => false,
+            }
+        } else {
+            true
+        }
+    });
 
-    vp_check && nft::vp(tx_data, &addr, &keys_changed, &verifiers)
+    Ok(vp_check && nft::vp(tx_data, &addr, &keys_changed, &verifiers))
 }
 
 #[cfg(test)]

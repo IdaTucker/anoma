@@ -13,11 +13,12 @@ pub const MAX_FREE_DEBIT: i128 = 1_000_000_000; // in micro units
 
 #[validity_predicate]
 fn validate_tx(
+    ctx: &Ctx,
     tx_data: Vec<u8>,
     addr: Address,
     keys_changed: BTreeSet<storage::Key>,
     verifiers: BTreeSet<Address>,
-) -> bool {
+) -> VpResult {
     debug_log!(
         "vp_testnet_faucet called with user addr: {}, key_changed: {:?}, \
          verifiers: {:?}",
@@ -33,15 +34,20 @@ fn validate_tx(
         Ok(signed_tx_data) => {
             let pk = key::get(&addr);
             match pk {
-                Some(pk) => verify_tx_signature(&pk, &signed_tx_data.sig),
+                Some(pk) => {
+                    matches!(
+                        ctx.verify_tx_signature(&pk, &signed_tx_data.sig),
+                        Ok(true)
+                    )
+                }
                 None => false,
             }
         }
         _ => false,
     });
 
-    if !is_tx_whitelisted() {
-        return false;
+    if !is_tx_whitelisted(ctx)? {
+        return reject();
     }
 
     for key in keys_changed.iter() {
@@ -64,13 +70,13 @@ fn validate_tx(
             if owner == &addr {
                 if has_post {
                     let vp: Vec<u8> = read_bytes_post(&key).unwrap();
-                    return *valid_sig && is_vp_whitelisted(&vp);
+                    return Ok(*valid_sig && is_vp_whitelisted(ctx, &vp)?);
                 } else {
-                    return false;
+                    return reject();
                 }
             } else {
                 let vp: Vec<u8> = read_bytes_post(&key).unwrap();
-                return is_vp_whitelisted(&vp);
+                return is_vp_whitelisted(ctx, &vp);
             }
         } else {
             // Allow any other key change if authorized by a signature
@@ -78,10 +84,10 @@ fn validate_tx(
         };
         if !is_valid {
             debug_log!("key {} modification failed vp", key);
-            return false;
+            return reject();
         }
     }
-    true
+    accept()
 }
 
 #[cfg(test)]

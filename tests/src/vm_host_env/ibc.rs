@@ -69,15 +69,14 @@ use anoma::types::storage::{BlockHash, BlockHeight, Key};
 use anoma::types::time::Rfc3339String;
 use anoma::types::token::{self, Amount};
 use anoma::vm::{wasm, WasmCacheRwAccess};
-use tempfile::TempDir;
 
 use crate::tx::*;
 
 const VP_ALWAYS_TRUE_WASM: &str = "../wasm_for_tests/vp_always_true.wasm";
+const ADDRESS: Address = Address::Internal(InternalAddress::Ibc);
 
 pub struct TestIbcVp<'a> {
     pub ibc: Ibc<'a, MockDB, Sha256Hasher, WasmCacheRwAccess>,
-    pub keys_changed: BTreeSet<Key>,
 }
 
 impl<'a> TestIbcVp<'a> {
@@ -85,14 +84,16 @@ impl<'a> TestIbcVp<'a> {
         &self,
         tx_data: &[u8],
     ) -> std::result::Result<bool, anoma::ledger::ibc::vp::Error> {
-        self.ibc
-            .validate_tx(tx_data, &self.keys_changed, &BTreeSet::new())
+        self.ibc.validate_tx(
+            tx_data,
+            &self.ibc.ctx.keys_changed,
+            &BTreeSet::new(),
+        )
     }
 }
 
 pub struct TestIbcTokenVp<'a> {
     pub token: IbcToken<'a, MockDB, Sha256Hasher, WasmCacheRwAccess>,
-    pub keys_changed: BTreeSet<Key>,
 }
 
 impl<'a> TestIbcTokenVp<'a> {
@@ -100,8 +101,11 @@ impl<'a> TestIbcTokenVp<'a> {
         &self,
         tx_data: &[u8],
     ) -> std::result::Result<bool, anoma::ledger::ibc::vp::IbcTokenError> {
-        self.token
-            .validate_tx(tx_data, &self.keys_changed, &BTreeSet::new())
+        self.token.validate_tx(
+            tx_data,
+            &self.token.ctx.keys_changed,
+            &BTreeSet::new(),
+        )
     }
 }
 
@@ -171,11 +175,11 @@ impl IbcActions for TestIbcActions {
     }
 }
 
-/// Initialize IBC VP by running a transaction.
-pub fn init_ibc_vp_from_tx<'a>(
+/// Validate an IBC transaction with IBC VP.
+pub fn validate_ibc_vp_from_tx<'a>(
     tx_env: &'a TestTxEnv,
     tx: &'a Tx,
-) -> (TestIbcVp<'a>, TempDir) {
+) -> std::result::Result<bool, anoma::ledger::ibc::vp::Error> {
     let (verifiers, keys_changed) = tx_env
         .write_log
         .verifiers_and_changed_keys(&tx_env.verifiers);
@@ -186,27 +190,30 @@ pub fn init_ibc_vp_from_tx<'a>(
             addr, verifiers
         );
     }
-    let (vp_wasm_cache, vp_cache_dir) =
+    let (vp_wasm_cache, _vp_cache_dir) =
         wasm::compilation_cache::common::testing::cache();
 
     let ctx = Ctx::new(
+        &ADDRESS,
         &tx_env.storage,
         &tx_env.write_log,
         tx,
         VpGasMeter::new(0),
+        &keys_changed,
+        &verifiers,
         vp_wasm_cache,
     );
     let ibc = Ibc { ctx };
 
-    (TestIbcVp { ibc, keys_changed }, vp_cache_dir)
+    TestIbcVp { ibc }.validate(tx.data.as_ref().unwrap())
 }
 
-/// Initialize the native token VP for the given address
-pub fn init_token_vp_from_tx<'a>(
+/// Validate the native token VP for the given address
+pub fn validate_token_vp_from_tx<'a>(
     tx_env: &'a TestTxEnv,
     tx: &'a Tx,
     addr: &Address,
-) -> (TestIbcTokenVp<'a>, TempDir) {
+) -> std::result::Result<bool, anoma::ledger::ibc::vp::IbcTokenError> {
     let (verifiers, keys_changed) = tx_env
         .write_log
         .verifiers_and_changed_keys(&tx_env.verifiers);
@@ -217,26 +224,57 @@ pub fn init_token_vp_from_tx<'a>(
             addr, verifiers
         );
     }
-    let (vp_wasm_cache, vp_cache_dir) =
+    let (vp_wasm_cache, _vp_cache_dir) =
         wasm::compilation_cache::common::testing::cache();
 
     let ctx = Ctx::new(
+        &ADDRESS,
         &tx_env.storage,
         &tx_env.write_log,
         tx,
         VpGasMeter::new(0),
+        &keys_changed,
+        &verifiers,
         vp_wasm_cache,
     );
     let token = IbcToken { ctx };
 
-    (
-        TestIbcTokenVp {
-            token,
-            keys_changed,
-        },
-        vp_cache_dir,
-    )
+    TestIbcTokenVp { token }.validate(tx.data.as_ref().unwrap())
 }
+
+// /// Initialize the native token VP for the given address
+// pub fn init_token_vp_from_tx<'a>(
+//     tx_env: &'a TestTxEnv,
+//     tx: &'a Tx,
+//     addr: &Address,
+// ) -> (TestIbcTokenVp<'a>, TempDir) {
+//     let (verifiers, keys_changed) = tx_env
+//         .write_log
+//         .verifiers_and_changed_keys(&tx_env.verifiers);
+//     if !verifiers.contains(addr) {
+//         panic!(
+//             "The given token address {} isn't part of the tx verifiers set: \
+//              {:#?}",
+//             addr, verifiers
+//         );
+//     }
+//     let (vp_wasm_cache, vp_cache_dir) =
+//         wasm::compilation_cache::common::testing::cache();
+
+//     let ctx = Ctx::new(
+//         &ADDRESS,
+//         &tx_env.storage,
+//         &tx_env.write_log,
+//         tx,
+//         VpGasMeter::new(0),
+//         &keys_changed,
+//         &verifiers,
+//         vp_wasm_cache,
+//     );
+//     let token = IbcToken { ctx };
+
+//     (TestIbcTokenVp { token }, vp_cache_dir)
+// }
 
 /// Initialize the test storage. Requires initialized [`tx_host_env::ENV`].
 pub fn init_storage() -> (Address, Address) {

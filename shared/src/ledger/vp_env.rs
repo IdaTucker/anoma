@@ -1,7 +1,6 @@
 //! Validity predicate environment contains functions that can be called from
 //! inside validity predicates.
 
-use std::collections::BTreeSet;
 use std::num::TryFromIntError;
 
 use borsh::BorshDeserialize;
@@ -13,14 +12,14 @@ use crate::ledger::gas::VpGasMeter;
 use crate::ledger::storage::write_log::WriteLog;
 use crate::ledger::storage::{self, write_log, Storage, StorageHasher};
 use crate::proto::Tx;
-use crate::types::address::Address;
 use crate::types::hash::Hash;
+use crate::types::key::common;
 use crate::types::storage::{BlockHash, BlockHeight, Epoch, Key};
 
 /// Validity predicate's environment is available for native VPs and WASM VPs
 pub trait VpEnv {
     /// Storage read prefix iterator
-    type PrefixIter: Iterator<Item = (String, Vec<u8>, u64)>;
+    type PrefixIter;
 
     /// Host functions possible error.
     ///
@@ -125,11 +124,17 @@ pub trait VpEnv {
     /// Otherwise returns the result of evaluation.
     fn eval(
         &mut self,
-        address: &Address,
-        keys_changed: &BTreeSet<Key>,
-        verifiers: &BTreeSet<Address>,
         vp_code: Vec<u8>,
         input_data: Vec<u8>,
+    ) -> Result<bool, Self::Error>;
+
+    /// Verify a transaction signature. The signature is expected to have been
+    /// produced on the encoded transaction [`anoma::proto::Tx`]
+    /// using [`anoma::proto::Tx::sign`].
+    fn verify_tx_signature(
+        &self,
+        pk: &common::PublicKey,
+        sig: &common::Signature,
     ) -> Result<bool, Self::Error>;
 }
 

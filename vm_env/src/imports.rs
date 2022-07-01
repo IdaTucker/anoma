@@ -371,6 +371,8 @@ pub mod vp {
     };
     pub use borsh::{BorshDeserialize, BorshSerialize};
 
+    use crate::tx_prelude::KeyValIterator;
+
     pub struct Ctx(());
 
     impl Ctx {
@@ -413,7 +415,7 @@ pub mod vp {
         // `anoma_macros::validity_predicate` macro.
         type Error = Infallible;
         // TODO there's no pre/post in native VP yet?
-        type PrefixIter = std::vec::IntoIter<(String, Vec<u8>, u64)>;
+        type PrefixIter = KeyValIterator<(String, Vec<u8>, u64)>;
 
         fn read_pre<T: BorshDeserialize>(
             &self,
@@ -536,21 +538,33 @@ pub mod vp {
             &self,
             prefix: &storage::Key,
         ) -> Result<Self::PrefixIter, Self::Error> {
-            todo!()
+            let prefix = prefix.to_string();
+            let iter_id = unsafe {
+                anoma_vp_iter_prefix(prefix.as_ptr() as _, prefix.len() as _)
+            };
+            Ok(KeyValIterator(iter_id, PhantomData))
         }
 
         fn iter_pre_next(
             &self,
             iter: &mut Self::PrefixIter,
         ) -> Result<Option<(String, Vec<u8>)>, Self::Error> {
-            todo!()
+            let read_result = unsafe { anoma_vp_iter_pre_next(iter.0) };
+            Ok(super::read_key_val_from_buffer(
+                read_result,
+                anoma_vp_result_buffer,
+            ))
         }
 
         fn iter_post_next(
             &self,
             iter: &mut Self::PrefixIter,
         ) -> Result<Option<(String, Vec<u8>)>, Self::Error> {
-            todo!()
+            let read_result = unsafe { anoma_vp_iter_post_next(iter.0) };
+            Ok(super::read_key_val_from_buffer(
+                read_result,
+                anoma_vp_result_buffer,
+            ))
         }
 
         fn eval(
@@ -567,6 +581,24 @@ pub mod vp {
                 )
             };
             Ok(HostEnvResult::is_success(result))
+        }
+
+        fn verify_tx_signature(
+            &self,
+            pk: &common::PublicKey,
+            sig: &common::Signature,
+        ) -> Result<bool, Self::Error> {
+            let pk = BorshSerialize::try_to_vec(pk).unwrap();
+            let sig = BorshSerialize::try_to_vec(sig).unwrap();
+            let valid = unsafe {
+                anoma_vp_verify_tx_signature(
+                    pk.as_ptr() as _,
+                    pk.len() as _,
+                    sig.as_ptr() as _,
+                    sig.len() as _,
+                )
+            };
+            Ok(HostEnvResult::is_success(valid))
         }
     }
 

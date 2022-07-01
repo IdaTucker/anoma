@@ -103,15 +103,6 @@ mod native_vp_host_env {
     #[cfg(not(feature = "wasm-runtime"))]
     pub struct VpEval;
 
-    pub type TestVpEnv = VpVmEnv<
-        'static,
-        NativeMemory,
-        MockDB,
-        Sha256Hasher,
-        VpEval,
-        WasmCacheRwAccess,
-    >;
-
     thread_local! {
         /// A [`TestVpEnv`] that can be used for VP host env functions calls
         /// that implements the WASM host environment in native environment.

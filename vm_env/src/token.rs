@@ -42,12 +42,12 @@ pub mod vp {
                     };
                     let post: Amount = match owner {
                         Address::Internal(InternalAddress::IbcMint) => {
-                            ctx.read_temp(&key)?.unwrap_or_else(Amount::max)
+                            ctx.read_temp(key)?.unwrap_or_else(Amount::max)
                         }
                         Address::Internal(InternalAddress::IbcBurn) => {
-                            ctx.read_temp(&key)?.unwrap_or_default()
+                            ctx.read_temp(key)?.unwrap_or_default()
                         }
-                        _ => ctx.read_post(&key)?.unwrap_or_default(),
+                        _ => ctx.read_post(key)?.unwrap_or_default(),
                     };
                     let this_change = post.change() - pre.change();
                     change += this_change;

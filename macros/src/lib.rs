@@ -119,7 +119,7 @@ pub fn validity_predicate(
             // have interface identical with the native VPs, in which the
             // context is explicit, in here we're just using an empty `Ctx`
             // to "fake" it.
-            let ctx = Ctx::new();
+            let ctx = unsafe { Ctx::new() };
 
             // run validation with the concrete type(s)
             if #ident(&ctx, tx_data, addr, keys_changed, verifiers)

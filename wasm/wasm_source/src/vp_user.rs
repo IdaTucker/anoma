@@ -57,11 +57,12 @@ impl<'a> From<&'a storage::Key> for KeyType<'a> {
 
 #[validity_predicate]
 fn validate_tx(
+    ctx: &Ctx,
     tx_data: Vec<u8>,
     addr: Address,
     keys_changed: BTreeSet<storage::Key>,
     verifiers: BTreeSet<Address>,
-) -> bool {
+) -> VpResult {
     debug_log!(
         "vp_user called with user addr: {}, key_changed: {:?}, verifiers: {:?}",
         addr,
@@ -76,11 +77,11 @@ fn validate_tx(
         Ok(signed_tx_data) => {
             let pk = key::get(&addr);
             match pk {
-                Some(pk) => verify_tx_signature(&pk, &signed_tx_data.sig),
-                None => false,
+                Some(pk) => ctx.verify_tx_signature(&pk, &signed_tx_data.sig),
+                None => Ok(false),
             }
         }
-        _ => false,
+        _ => Ok(false),
     });
 
     let valid_intent = Lazy::new(|| match &*signed_tx_data {
@@ -88,8 +89,8 @@ fn validate_tx(
         _ => false,
     });
 
-    if !is_tx_whitelisted() {
-        return false;
+    if !is_tx_whitelisted(ctx)? {
+        return reject();
     }
 
     for key in keys_changed.iter() {
@@ -97,19 +98,19 @@ fn validate_tx(
         let is_valid = match key_type {
             KeyType::Token(owner) => {
                 if owner == &addr {
-                    let key = key.to_string();
-                    let pre: token::Amount = read_pre(&key).unwrap_or_default();
+                    let pre: token::Amount =
+                        ctx.read_pre(&key)?.unwrap_or_default();
                     let post: token::Amount =
-                        read_post(&key).unwrap_or_default();
+                        ctx.read_post(&key)?.unwrap_or_default();
                     let change = post.change() - pre.change();
                     // debit has to signed, credit doesn't
-                    let valid = change >= 0 || *valid_sig || *valid_intent;
+                    let valid = change >= 0 || (*valid_sig)? || *valid_intent;
                     debug_log!(
                         "token key: {}, change: {}, valid_sig: {}, \
                          valid_intent: {}, valid modification: {}",
                         key,
                         change,
-                        *valid_sig,
+                        (*valid_sig)?,
                         *valid_intent,
                         valid
                     );
@@ -134,7 +135,7 @@ fn validate_tx(
                     Some(bond_id) => {
                         // Bonds and unbonds changes for this address
                         // must be signed
-                        bond_id.source != addr || *valid_sig
+                        bond_id.source != addr || (*valid_sig)?
                     }
                     None => {
                         // Any other PoS changes are allowed without signature
@@ -171,38 +172,39 @@ fn validate_tx(
             }
             KeyType::Nft(owner) => {
                 if owner == &addr {
-                    *valid_sig
+                    (*valid_sig)?
                 } else {
                     true
                 }
             }
             KeyType::GovernanceVote(voter) => {
                 if voter == &addr {
-                    *valid_sig
+                    (*valid_sig)?
                 } else {
                     true
                 }
             }
             KeyType::Vp(owner) => {
-                let key = key.to_string();
-                let has_post: bool = has_key_post(&key);
+                let has_post: bool = ctx.has_key_post(&key)?;
                 if owner == &addr {
                     if has_post {
-                        let vp: Vec<u8> = read_bytes_post(&key).unwrap();
-                        return *valid_sig && is_vp_whitelisted(&vp);
+                        let vp: Vec<u8> = ctx.read_bytes_post(&key)?.unwrap();
+                        return Ok(
+                            (*valid_sig)? && is_vp_whitelisted(ctx, &vp)?
+                        );
                     } else {
-                        return false;
+                        return reject();
                     }
                 } else {
-                    let vp: Vec<u8> = read_bytes_post(&key).unwrap();
-                    return is_vp_whitelisted(&vp);
+                    let vp: Vec<u8> = ctx.read_bytes_post(&key)?.unwrap();
+                    return is_vp_whitelisted(ctx, &vp);
                 }
             }
             KeyType::Unknown => {
                 if key.segments.get(0) == Some(&addr.to_db_key()) {
                     // Unknown changes to this address space require a valid
                     // signature
-                    *valid_sig
+                    (*valid_sig)?
                 } else {
                     // Unknown changes anywhere else are permitted
                     true
@@ -211,11 +213,11 @@ fn validate_tx(
         };
         if !is_valid {
             debug_log!("key {} modification failed vp", key);
-            return false;
+            return reject();
         }
     }
 
-    true
+    accept()
 }
 
 fn check_intent_transfers(

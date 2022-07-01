@@ -46,6 +46,8 @@ where
     H: StorageHasher,
     CA: WasmCacheAccess,
 {
+    /// The address of the account that owns the VP
+    pub address: &'a Address,
     /// Storage prefix iterators.
     pub iterators: RefCell<PrefixIterators<'a, DB>>,
     /// VP gas meter.
@@ -56,6 +58,11 @@ where
     pub write_log: &'a WriteLog,
     /// The transaction code is used for signature verification
     pub tx: &'a Tx,
+    /// The storage keys that have been changed. Used for calls to `eval`.
+    pub keys_changed: &'a BTreeSet<Key>,
+    /// The verifiers whose validity predicates should be triggered. Used for
+    /// calls to `eval`.
+    pub verifiers: &'a BTreeSet<Address>,
     /// VP WASM compilation cache
     #[cfg(feature = "wasm-runtime")]
     pub vp_wasm_cache: crate::vm::wasm::VpCache<CA>,
@@ -71,20 +78,27 @@ where
     CA: 'static + WasmCacheAccess,
 {
     /// Initialize a new context for native VP call
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
+        address: &'a Address,
         storage: &'a Storage<DB, H>,
         write_log: &'a WriteLog,
         tx: &'a Tx,
         gas_meter: VpGasMeter,
+        keys_changed: &'a BTreeSet<Key>,
+        verifiers: &'a BTreeSet<Address>,
         #[cfg(feature = "wasm-runtime")]
         vp_wasm_cache: crate::vm::wasm::VpCache<CA>,
     ) -> Self {
         Self {
+            address,
             iterators: RefCell::new(PrefixIterators::default()),
             gas_meter: RefCell::new(gas_meter),
             storage,
             write_log,
             tx,
+            keys_changed,
+            verifiers,
             #[cfg(feature = "wasm-runtime")]
             vp_wasm_cache,
             #[cfg(not(feature = "wasm-runtime"))]
@@ -247,9 +261,6 @@ where
 
     fn eval(
         &mut self,
-        address: &Address,
-        keys_changed: &BTreeSet<Key>,
-        verifiers: &BTreeSet<Address>,
         vp_code: Vec<u8>,
         input_data: Vec<u8>,
     ) -> Result<bool, Self::Error> {
@@ -270,15 +281,15 @@ where
             let mut result_buffer: Option<Vec<u8>> = None;
 
             let ctx = VpCtx::new(
-                address,
+                self.address,
                 self.storage,
                 self.write_log,
                 &mut *self.gas_meter.borrow_mut(),
                 self.tx,
                 &mut iterators,
-                verifiers,
+                self.verifiers,
                 &mut result_buffer,
-                keys_changed,
+                self.keys_changed,
                 &eval_runner,
                 &mut self.vp_wasm_cache,
             );
@@ -296,11 +307,20 @@ where
 
         #[cfg(not(feature = "wasm-runtime"))]
         {
-            let _ = (address, keys_changed, verifiers, vp_code, input_data);
+            // This line is here to prevent unused var clippy warning
+            let _ = (vp_code, input_data);
             unimplemented!(
                 "The \"wasm-runtime\" feature must be enabled to use the \
                  `eval` function."
             )
         }
+    }
+
+    fn verify_tx_signature(
+        &self,
+        pk: &crate::types::key::common::PublicKey,
+        sig: &crate::types::key::common::Signature,
+    ) -> Result<bool, Self::Error> {
+        Ok(self.tx.verify_sig(pk, sig).is_ok())
     }
 }
