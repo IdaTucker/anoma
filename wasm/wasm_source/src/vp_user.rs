@@ -99,9 +99,9 @@ fn validate_tx(
             KeyType::Token(owner) => {
                 if owner == &addr {
                     let pre: token::Amount =
-                        ctx.read_pre(&key)?.unwrap_or_default();
+                        ctx.read_pre(key)?.unwrap_or_default();
                     let post: token::Amount =
-                        ctx.read_post(&key)?.unwrap_or_default();
+                        ctx.read_post(key)?.unwrap_or_default();
                     let change = post.change() - pre.change();
                     // debit has to signed, credit doesn't
                     let valid = change >= 0 || (*valid_sig)? || *valid_intent;
@@ -151,11 +151,10 @@ fn validate_tx(
             }
             KeyType::InvalidIntentSet(owner) => {
                 if owner == &addr {
-                    let key = key.to_string();
                     let pre: HashSet<key::common::Signature> =
-                        read_pre(&key).unwrap_or_default();
+                        ctx.read_pre(key)?.unwrap_or_default();
                     let post: HashSet<key::common::Signature> =
-                        read_post(&key).unwrap_or_default();
+                        ctx.read_post(key)?.unwrap_or_default();
                     // A new invalid intent must have been added
                     pre.len() + 1 == post.len()
                 } else {
@@ -185,10 +184,10 @@ fn validate_tx(
                 }
             }
             KeyType::Vp(owner) => {
-                let has_post: bool = ctx.has_key_post(&key)?;
+                let has_post: bool = ctx.has_key_post(key)?;
                 if owner == &addr {
                     if has_post {
-                        let vp: Vec<u8> = ctx.read_bytes_post(&key)?.unwrap();
+                        let vp: Vec<u8> = ctx.read_bytes_post(key)?.unwrap();
                         return Ok(
                             (*valid_sig)? && is_vp_whitelisted(ctx, &vp)?
                         );
@@ -196,7 +195,7 @@ fn validate_tx(
                         return reject();
                     }
                 } else {
-                    let vp: Vec<u8> = ctx.read_bytes_post(&key)?.unwrap();
+                    let vp: Vec<u8> = ctx.read_bytes_post(key)?.unwrap();
                     return is_vp_whitelisted(ctx, &vp);
                 }
             }
@@ -390,7 +389,10 @@ mod tests {
         // The VP env must be initialized before calling `validate_tx`
         vp_host_env::init();
 
-        assert!(validate_tx(tx_data, addr, keys_changed, verifiers));
+        assert!(
+            validate_tx(&ctx(), tx_data, addr, keys_changed, verifiers)
+                .unwrap()
+        );
     }
 
     /// Test that a credit transfer is accepted.
@@ -423,7 +425,10 @@ mod tests {
             vp_env.all_touched_storage_keys();
         let verifiers: BTreeSet<Address> = BTreeSet::default();
         vp_host_env::set(vp_env);
-        assert!(validate_tx(tx_data, vp_owner, keys_changed, verifiers));
+        assert!(
+            validate_tx(&ctx(), tx_data, vp_owner, keys_changed, verifiers)
+                .unwrap()
+        );
     }
 
     /// Test that a debit transfer without a valid signature is rejected.
@@ -456,7 +461,10 @@ mod tests {
             vp_env.all_touched_storage_keys();
         let verifiers: BTreeSet<Address> = BTreeSet::default();
         vp_host_env::set(vp_env);
-        assert!(!validate_tx(tx_data, vp_owner, keys_changed, verifiers));
+        assert!(
+            !validate_tx(&ctx(), tx_data, vp_owner, keys_changed, verifiers)
+                .unwrap()
+        );
     }
 
     /// Test that a debit transfer with a valid signature is accepted.
@@ -496,7 +504,10 @@ mod tests {
             vp_env.all_touched_storage_keys();
         let verifiers: BTreeSet<Address> = BTreeSet::default();
         vp_host_env::set(vp_env);
-        assert!(validate_tx(tx_data, vp_owner, keys_changed, verifiers));
+        assert!(
+            validate_tx(&ctx(), tx_data, vp_owner, keys_changed, verifiers)
+                .unwrap()
+        );
     }
 
     /// Test that a transfer on with accounts other than self is accepted.
@@ -531,7 +542,10 @@ mod tests {
             vp_env.all_touched_storage_keys();
         let verifiers: BTreeSet<Address> = BTreeSet::default();
         vp_host_env::set(vp_env);
-        assert!(validate_tx(tx_data, vp_owner, keys_changed, verifiers));
+        assert!(
+            validate_tx(&ctx(), tx_data, vp_owner, keys_changed, verifiers)
+                .unwrap()
+        );
     }
 
     prop_compose! {
@@ -583,7 +597,7 @@ mod tests {
                 vp_env.all_touched_storage_keys();
             let verifiers: BTreeSet<Address> = BTreeSet::default();
             vp_host_env::set(vp_env);
-            assert!(!validate_tx(tx_data, vp_owner, keys_changed, verifiers));
+            assert!(!validate_tx(&ctx(), tx_data, vp_owner, keys_changed, verifiers).unwrap());
         }
     }
 
@@ -628,7 +642,7 @@ mod tests {
             vp_env.all_touched_storage_keys();
             let verifiers: BTreeSet<Address> = BTreeSet::default();
             vp_host_env::set(vp_env);
-            assert!(validate_tx(tx_data, vp_owner, keys_changed, verifiers));
+            assert!(validate_tx(&ctx(), tx_data, vp_owner, keys_changed, verifiers).unwrap());
         }
     }
 
@@ -658,7 +672,10 @@ mod tests {
             vp_env.all_touched_storage_keys();
         let verifiers: BTreeSet<Address> = BTreeSet::default();
         vp_host_env::set(vp_env);
-        assert!(!validate_tx(tx_data, vp_owner, keys_changed, verifiers));
+        assert!(
+            !validate_tx(&ctx(), tx_data, vp_owner, keys_changed, verifiers)
+                .unwrap()
+        );
     }
 
     /// Test that a validity predicate update with a valid signature is
@@ -695,7 +712,10 @@ mod tests {
             vp_env.all_touched_storage_keys();
         let verifiers: BTreeSet<Address> = BTreeSet::default();
         vp_host_env::set(vp_env);
-        assert!(validate_tx(tx_data, vp_owner, keys_changed, verifiers));
+        assert!(
+            validate_tx(&ctx(), tx_data, vp_owner, keys_changed, verifiers)
+                .unwrap()
+        );
     }
 
     /// Test that a validity predicate update is rejected if not whitelisted
@@ -731,7 +751,10 @@ mod tests {
             vp_env.all_touched_storage_keys();
         let verifiers: BTreeSet<Address> = BTreeSet::default();
         vp_host_env::set(vp_env);
-        assert!(!validate_tx(tx_data, vp_owner, keys_changed, verifiers));
+        assert!(
+            !validate_tx(&ctx(), tx_data, vp_owner, keys_changed, verifiers)
+                .unwrap()
+        );
     }
 
     /// Test that a validity predicate update is accepted if whitelisted
@@ -769,7 +792,10 @@ mod tests {
             vp_env.all_touched_storage_keys();
         let verifiers: BTreeSet<Address> = BTreeSet::default();
         vp_host_env::set(vp_env);
-        assert!(validate_tx(tx_data, vp_owner, keys_changed, verifiers));
+        assert!(
+            validate_tx(&ctx(), tx_data, vp_owner, keys_changed, verifiers)
+                .unwrap()
+        );
     }
 
     /// Test that a tx is rejected if not whitelisted
@@ -811,7 +837,10 @@ mod tests {
             vp_env.all_touched_storage_keys();
         let verifiers: BTreeSet<Address> = BTreeSet::default();
         vp_host_env::set(vp_env);
-        assert!(!validate_tx(tx_data, vp_owner, keys_changed, verifiers));
+        assert!(
+            !validate_tx(&ctx(), tx_data, vp_owner, keys_changed, verifiers)
+                .unwrap()
+        );
     }
 
     #[test]
@@ -848,6 +877,9 @@ mod tests {
             vp_env.all_touched_storage_keys();
         let verifiers: BTreeSet<Address> = BTreeSet::default();
         vp_host_env::set(vp_env);
-        assert!(validate_tx(tx_data, vp_owner, keys_changed, verifiers));
+        assert!(
+            validate_tx(&ctx(), tx_data, vp_owner, keys_changed, verifiers)
+                .unwrap()
+        );
     }
 }

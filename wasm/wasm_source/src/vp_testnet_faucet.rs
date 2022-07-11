@@ -118,7 +118,10 @@ mod tests {
         // The VP env must be initialized before calling `validate_tx`
         vp_host_env::init();
 
-        assert!(validate_tx(tx_data, addr, keys_changed, verifiers));
+        assert!(
+            validate_tx(&ctx(), tx_data, addr, keys_changed, verifiers)
+                .unwrap()
+        );
     }
 
     /// Test that a credit transfer is accepted.
@@ -151,7 +154,10 @@ mod tests {
             vp_env.all_touched_storage_keys();
         let verifiers: BTreeSet<Address> = BTreeSet::default();
         vp_host_env::set(vp_env);
-        assert!(validate_tx(tx_data, vp_owner, keys_changed, verifiers));
+        assert!(
+            validate_tx(&ctx(), tx_data, vp_owner, keys_changed, verifiers)
+                .unwrap()
+        );
     }
 
     /// Test that a validity predicate update without a valid signature is
@@ -180,7 +186,10 @@ mod tests {
             vp_env.all_touched_storage_keys();
         let verifiers: BTreeSet<Address> = BTreeSet::default();
         vp_host_env::set(vp_env);
-        assert!(!validate_tx(tx_data, vp_owner, keys_changed, verifiers));
+        assert!(
+            !validate_tx(&ctx(), tx_data, vp_owner, keys_changed, verifiers)
+                .unwrap()
+        );
     }
 
     /// Test that a validity predicate update with a valid signature is
@@ -216,7 +225,10 @@ mod tests {
             vp_env.all_touched_storage_keys();
         let verifiers: BTreeSet<Address> = BTreeSet::default();
         vp_host_env::set(vp_env);
-        assert!(validate_tx(tx_data, vp_owner, keys_changed, verifiers));
+        assert!(
+            validate_tx(&ctx(), tx_data, vp_owner, keys_changed, verifiers)
+                .unwrap()
+        );
     }
 
     prop_compose! {
@@ -266,7 +278,7 @@ mod tests {
         vp_env.all_touched_storage_keys();
         let verifiers: BTreeSet<Address> = BTreeSet::default();
         vp_host_env::set(vp_env);
-        assert!(!validate_tx(tx_data, vp_owner, keys_changed, verifiers));
+        assert!(!validate_tx(&ctx(), tx_data, vp_owner, keys_changed, verifiers).unwrap());
     }
 
     /// Test that a debit of less than or equal to [`MAX_FREE_DEBIT`] tokens without a valid signature is accepted.
@@ -299,7 +311,7 @@ mod tests {
         vp_env.all_touched_storage_keys();
         let verifiers: BTreeSet<Address> = BTreeSet::default();
         vp_host_env::set(vp_env);
-        assert!(validate_tx(tx_data, vp_owner, keys_changed, verifiers));
+        assert!(validate_tx(&ctx(), tx_data, vp_owner, keys_changed, verifiers).unwrap());
     }
 
         /// Test that a signed tx that performs arbitrary storage writes or
@@ -342,7 +354,7 @@ mod tests {
             vp_env.all_touched_storage_keys();
             let verifiers: BTreeSet<Address> = BTreeSet::default();
             vp_host_env::set(vp_env);
-            assert!(validate_tx(tx_data, vp_owner, keys_changed, verifiers));
+            assert!(validate_tx(&ctx(), tx_data, vp_owner, keys_changed, verifiers).unwrap());
         }
     }
 }

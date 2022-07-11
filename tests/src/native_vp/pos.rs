@@ -105,7 +105,7 @@ mod tests {
     use anoma::ledger::pos::anoma_proof_of_stake::PosBase;
     use anoma::ledger::pos::PosParams;
     use anoma::types::storage::Epoch;
-    use anoma::types::token;
+    use anoma::types::{address, token};
     use anoma_vm_env::proof_of_stake::parameters::testing::arb_pos_params;
     use anoma_vm_env::proof_of_stake::{staking_token_address, PosVP};
     use anoma_vm_env::tx_prelude::Address;
@@ -410,10 +410,13 @@ mod tests {
         fn validate_transitions(&self) {
             // Use the tx_env to run PoS VP
             let tx_env = tx_host_env::take();
-            let vp_env = TestNativeVpEnv::new(tx_env);
-            let result = vp_env.validate_tx(PosVP::new, |_tx_data| {});
+
+            let vp_env = TestNativeVpEnv::from_tx_env(tx_env, address::POS);
+            let result = vp_env.validate_tx(PosVP::new);
+
             // Put the tx_env back before checking the result
             tx_host_env::set(vp_env.tx_env);
+
             let result =
                 result.expect("Validation of valid changes must not fail!");
 

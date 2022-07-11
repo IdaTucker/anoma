@@ -86,7 +86,7 @@ impl<'a> TestIbcVp<'a> {
     ) -> std::result::Result<bool, anoma::ledger::ibc::vp::Error> {
         self.ibc.validate_tx(
             tx_data,
-            &self.ibc.ctx.keys_changed,
+            self.ibc.ctx.keys_changed,
             &BTreeSet::new(),
         )
     }
@@ -103,7 +103,7 @@ impl<'a> TestIbcTokenVp<'a> {
     ) -> std::result::Result<bool, anoma::ledger::ibc::vp::IbcTokenError> {
         self.token.validate_tx(
             tx_data,
-            &self.token.ctx.keys_changed,
+            self.token.ctx.keys_changed,
             &BTreeSet::new(),
         )
     }

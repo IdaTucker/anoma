@@ -10,6 +10,7 @@ use anoma::types::storage::{self, Key};
 use anoma::vm::prefix_iter::PrefixIterators;
 use anoma::vm::wasm::{self, VpCache};
 use anoma::vm::{self, WasmCacheRwAccess};
+pub use native_vp_host_env::ctx;
 use tempfile::TempDir;
 
 use crate::tx::{tx_host_env, TestTxEnv};
@@ -89,6 +90,7 @@ mod native_vp_host_env {
     use anoma::ledger::storage::Sha256Hasher;
     use anoma::vm::host_env::*;
     use anoma::vm::WasmCacheRwAccess;
+    use anoma_vm_env::vp_prelude;
     // TODO replace with `std::concat_idents` once stabilized (https://github.com/rust-lang/rust/issues/29599)
     use concat_idents::concat_idents;
 
@@ -108,6 +110,15 @@ mod native_vp_host_env {
         /// that implements the WASM host environment in native environment.
         pub static ENV: RefCell<Option<Pin<Box<TestVpEnv>>>> =
             RefCell::new(None);
+    }
+
+    pub fn ctx() -> vp_prelude::Ctx {
+        // The context on WASM side is only provided by the VM once its
+        // being executed (in here it's implicit). But because we want to
+        // have interface identical with the native VPs, in which the
+        // context is explicit, in here we're just using an empty `Ctx`
+        // to "fake" it
+        unsafe { vp_prelude::Ctx::new() }
     }
 
     /// Initialize the VP environment in [`ENV`]. This will be used in the

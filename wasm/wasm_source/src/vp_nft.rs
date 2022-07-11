@@ -85,7 +85,10 @@ mod tests {
             vp_env.all_touched_storage_keys();
         let verifiers: BTreeSet<Address> = vp_env.get_verifiers();
         vp_host_env::set(vp_env);
-        assert!(validate_tx(tx_data, nft_address, keys_changed, verifiers));
+        assert!(
+            validate_tx(&ctx(), tx_data, nft_address, keys_changed, verifiers)
+                .unwrap()
+        );
     }
 
     /// Test that you can create an nft without tokens
@@ -130,7 +133,10 @@ mod tests {
         let verifiers: BTreeSet<Address> = vp_env.get_verifiers();
         vp_host_env::set(vp_env);
 
-        assert!(validate_tx(tx_data, nft_address, keys_changed, verifiers));
+        assert!(
+            validate_tx(&ctx(), tx_data, nft_address, keys_changed, verifiers)
+                .unwrap()
+        );
     }
 
     /// Test that you can create an nft with tokens
@@ -184,7 +190,10 @@ mod tests {
         let verifiers: BTreeSet<Address> = vp_env.get_verifiers();
         vp_host_env::set(vp_env);
 
-        assert!(validate_tx(tx_data, nft_address, keys_changed, verifiers));
+        assert!(
+            validate_tx(&ctx(), tx_data, nft_address, keys_changed, verifiers)
+                .unwrap()
+        );
     }
 
     /// Test that only owner can mint new tokens
@@ -238,7 +247,10 @@ mod tests {
         let verifiers: BTreeSet<Address> = vp_env.get_verifiers();
         vp_host_env::set(vp_env);
 
-        assert!(!validate_tx(tx_data, nft_address, keys_changed, verifiers));
+        assert!(
+            !validate_tx(&ctx(), tx_data, nft_address, keys_changed, verifiers)
+                .unwrap()
+        );
     }
 
     /// Test that an approval can add another approval
@@ -310,7 +322,10 @@ mod tests {
         let verifiers: BTreeSet<Address> = vp_env.get_verifiers();
         vp_host_env::set(vp_env);
 
-        assert!(validate_tx(tx_data, nft_address, keys_changed, verifiers));
+        assert!(
+            validate_tx(&ctx(), tx_data, nft_address, keys_changed, verifiers)
+                .unwrap()
+        );
     }
 
     /// Test that an approval can add another approval
@@ -382,7 +397,10 @@ mod tests {
         let verifiers: BTreeSet<Address> = vp_env.get_verifiers();
         vp_host_env::set(vp_env);
 
-        assert!(!validate_tx(tx_data, nft_address, keys_changed, verifiers));
+        assert!(
+            !validate_tx(&ctx(), tx_data, nft_address, keys_changed, verifiers)
+                .unwrap()
+        );
     }
 
     /// Test nft address cannot be changed
@@ -423,6 +441,9 @@ mod tests {
         let verifiers: BTreeSet<Address> = vp_env.get_verifiers();
         vp_host_env::set(vp_env);
 
-        assert!(!validate_tx(tx_data, nft_address, keys_changed, verifiers));
+        assert!(
+            !validate_tx(&ctx(), tx_data, nft_address, keys_changed, verifiers)
+                .unwrap()
+        );
     }
 }
