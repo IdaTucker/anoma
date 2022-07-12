@@ -23,7 +23,7 @@ use anoma::types::governance::{
 };
 use anoma::types::key::*;
 use anoma::types::storage::{Epoch, PrefixValue};
-use anoma::types::token::{balance_key, Amount};
+use anoma::types::token::{balance_key, Transfer};
 use anoma::types::{address, storage, token};
 use async_std::fs::{self};
 use async_std::path::PathBuf;
@@ -33,6 +33,7 @@ use itertools::Itertools;
 use masp_primitives::asset_type::AssetType;
 use masp_primitives::merkle_tree::MerklePath;
 use masp_primitives::sapling::Node;
+use masp_primitives::transaction::components::Amount;
 #[cfg(not(feature = "ABCI"))]
 use tendermint::abci::Code;
 #[cfg(not(feature = "ABCI"))]
@@ -308,7 +309,7 @@ pub async fn get_token_balance(
     client: &HttpClient,
     token: &Address,
     owner: &Address,
-) -> Option<Amount> {
+) -> Option<token::Amount> {
     let balance_key = balance_key(token, owner);
     query_storage_value(client, &balance_key).await
 }
@@ -467,7 +468,7 @@ pub async fn query_protocol_parameters(
     );
 
     let key = gov_storage::get_min_proposal_fund_key();
-    let min_proposal_fund = query_storage_value::<Amount>(&client, &key)
+    let min_proposal_fund = query_storage_value::<token::Amount>(&client, &key)
         .await
         .expect("Parameter should be definied.");
     println!("{:4}Min. proposal funds: {}", "", min_proposal_fund);
@@ -521,9 +522,10 @@ pub async fn query_protocol_parameters(
 
     println!("Treasury parameters");
     let key = treasury_storage::get_max_transferable_fund_key();
-    let max_transferable_amount = query_storage_value::<Amount>(&client, &key)
-        .await
-        .expect("Parameter should be definied.");
+    let max_transferable_amount =
+        query_storage_value::<token::Amount>(&client, &key)
+            .await
+            .expect("Parameter should be definied.");
     println!(
         "{:4}Max. transferable amount: {}",
         "", max_transferable_amount
@@ -1609,9 +1611,9 @@ pub async fn get_proposal_votes(
         query_storage_prefix::<ProposalVote>(client.clone(), vote_prefix_key)
             .await;
 
-    let mut yay_validators: HashMap<Address, Amount> = HashMap::new();
-    let mut yay_delegators: HashMap<Address, Amount> = HashMap::new();
-    let mut nay_delegators: HashMap<Address, Amount> = HashMap::new();
+    let mut yay_validators: HashMap<Address, token::Amount> = HashMap::new();
+    let mut yay_delegators: HashMap<Address, token::Amount> = HashMap::new();
+    let mut nay_delegators: HashMap<Address, token::Amount> = HashMap::new();
 
     if let Some(vote_iter) = vote_iter {
         for (key, vote) in vote_iter {
@@ -1663,9 +1665,9 @@ pub async fn get_proposal_offline_votes(
 
     let proposal_hash = proposal.compute_hash();
 
-    let mut yay_validators: HashMap<Address, Amount> = HashMap::new();
-    let mut yay_delegators: HashMap<Address, Amount> = HashMap::new();
-    let mut nay_delegators: HashMap<Address, Amount> = HashMap::new();
+    let mut yay_validators: HashMap<Address, token::Amount> = HashMap::new();
+    let mut yay_delegators: HashMap<Address, token::Amount> = HashMap::new();
+    let mut nay_delegators: HashMap<Address, token::Amount> = HashMap::new();
 
     for path in files {
         let file = File::open(&path).expect("Proposal file must exist.");
@@ -1752,7 +1754,7 @@ pub async fn compute_tally(
         nay_delegators,
     } = votes;
 
-    let mut total_yay_stacked_tokens = Amount::from(0);
+    let mut total_yay_stacked_tokens = token::Amount::from(0);
     for (_, amount) in yay_validators.clone().into_iter() {
         total_yay_stacked_tokens += amount;
     }
@@ -1840,7 +1842,7 @@ pub async fn get_total_staked_tokes(
     epoch: Epoch,
     validators: &[Address],
 ) -> token::Amount {
-    let mut total = Amount::from(0);
+    let mut total = token::Amount::from(0);
 
     for validator in validators {
         total += get_validator_stake(client, epoch, validator).await;

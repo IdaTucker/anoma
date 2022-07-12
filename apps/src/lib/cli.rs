@@ -1641,12 +1641,13 @@ pub mod args {
     const SOURCE: Arg<WalletAddress> = arg("source");
     const SOURCE_OPT: ArgOpt<WalletAddress> = SOURCE.opt();
     const STORAGE_KEY: Arg<storage::Key> = arg("storage-key");
-    const TARGET: Arg<WalletAddress> = arg("target");
     const TO_STDOUT: ArgFlag = flag("stdout");
     const TOKEN_OPT: ArgOpt<WalletAddress> = TOKEN.opt();
     const TOKEN: Arg<WalletAddress> = arg("token");
     const TOPIC_OPT: ArgOpt<String> = arg_opt("topic");
     const TOPIC: Arg<String> = arg("topic");
+    const TRANSFER_SOURCE: Arg<WalletTransferSource> = arg("source");
+    const TRANSFER_TARGET: Arg<WalletTransferTarget> = arg("target");
     const TX_CODE_PATH: ArgOpt<PathBuf> = arg_opt("tx-code-path");
     const TX_HASH: Arg<String> = arg("tx-hash");
     const UNSAFE_DONT_ENCRYPT: ArgFlag = flag("unsafe-dont-encrypt");
@@ -1782,9 +1783,9 @@ pub mod args {
         /// Common tx arguments
         pub tx: Tx,
         /// Transfer source address
-        pub source: WalletAddress,
+        pub source: WalletTransferSource,
         /// Transfer target address
-        pub target: WalletAddress,
+        pub target: WalletTransferTarget,
         /// Transferred token address
         pub token: WalletAddress,
         /// Transferred token amount
@@ -1794,8 +1795,8 @@ pub mod args {
     impl Args for TxTransfer {
         fn parse(matches: &ArgMatches) -> Self {
             let tx = Tx::parse(matches);
-            let source = SOURCE.parse(matches);
-            let target = TARGET.parse(matches);
+            let source = TRANSFER_SOURCE.parse(matches);
+            let target = TRANSFER_TARGET.parse(matches);
             let token = TOKEN.parse(matches);
             let amount = AMOUNT.parse(matches);
             Self {
@@ -1809,11 +1810,14 @@ pub mod args {
 
         fn def(app: App) -> App {
             app.add_args::<Tx>()
-                .arg(SOURCE.def().about(
-                    "The source account address. The source's key is used to \
-                     produce the signature.",
+                .arg(TRANSFER_SOURCE.def().about(
+                    "The source account address. The source's key may be used \
+                     to produce the signature.",
                 ))
-                .arg(TARGET.def().about("The target account address."))
+                .arg(TRANSFER_TARGET.def().about(
+                    "The target account address. The target's key may be used \
+                     to produce the signature.",
+                ))
                 .arg(TOKEN.def().about("The transfer token."))
                 .arg(AMOUNT.def().about("The amount to transfer in decimal."))
         }

@@ -31,6 +31,7 @@ use anoma::ledger::storage::{
 };
 use anoma::ledger::{ibc, parameters, pos};
 use anoma::proto::{self, Tx};
+use anoma::types::address::{masp, masp_tx_key};
 use anoma::types::chain::ChainId;
 use anoma::types::key::*;
 use anoma::types::storage::{BlockHeight, Key, TxIndex};

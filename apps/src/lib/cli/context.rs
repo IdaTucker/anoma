@@ -12,6 +12,7 @@ use anoma::types::masp::*;
 
 use super::args;
 use crate::cli::safe_exit;
+use crate::client::tx::ShieldedContext;
 use crate::config::genesis::genesis_config;
 use crate::config::global::GlobalConfig;
 use crate::config::{self, Config};
@@ -39,6 +40,14 @@ pub type WalletPaymentAddr = FromContext<PaymentAddress>;
 /// in the wallet
 pub type WalletViewingKey = FromContext<ExtendedViewingKey>;
 
+/// A raw address or a raw extended spending key (bech32m encoding) or an alias
+/// of either in the wallet
+pub type WalletTransferSource = FromContext<TransferSource>;
+
+/// A raw address or a raw payment address (bech32m encoding) or an alias of
+/// either in the wallet
+pub type WalletTransferTarget = FromContext<TransferTarget>;
+
 /// A raw keypair (hex encoding), an alias, a public key or a public key hash of
 /// a keypair that may be found in the wallet
 pub type WalletKeypair = FromContext<common::SecretKey>;
@@ -58,6 +67,8 @@ pub struct Context {
     pub global_config: GlobalConfig,
     /// The ledger & intent gossip configuration for a specific chain ID
     pub config: Config,
+    /// The context fr shielded operations
+    pub shielded: ShieldedContext,
 }
 
 impl Context {
@@ -113,6 +124,7 @@ impl Context {
             wallet,
             global_config,
             config,
+            shielded: ShieldedContext::new(chain_dir),
         }
     }
 
@@ -225,6 +237,47 @@ impl<T> FromContext<T> {
     pub fn new(raw: String) -> FromContext<T> {
         Self {
             raw,
+            phantom: PhantomData,
+        }
+    }
+}
+
+impl FromContext<TransferSource> {
+    /// Converts this TransferSource argument to an Address. Call this function
+    /// only when certain that raw represents an Address.
+    pub fn to_address(&self) -> FromContext<Address> {
+        FromContext::<Address> {
+            raw: self.raw.clone(),
+            phantom: PhantomData,
+        }
+    }
+
+    /// Converts this TransferSource argument to an ExtendedSpendingKey. Call
+    /// this function only when certain that raw represents an
+    /// ExtendedSpendingKey.
+    pub fn to_spending_key(&self) -> FromContext<ExtendedSpendingKey> {
+        FromContext::<ExtendedSpendingKey> {
+            raw: self.raw.clone(),
+            phantom: PhantomData,
+        }
+    }
+}
+
+impl FromContext<TransferTarget> {
+    /// Converts this TransferTarget argument to an Address. Call this function
+    /// only when certain that raw represents an Address.
+    pub fn to_address(&self) -> FromContext<Address> {
+        FromContext::<Address> {
+            raw: self.raw.clone(),
+            phantom: PhantomData,
+        }
+    }
+
+    /// Converts this TransferTarget argument to a PaymentAddress. Call this
+    /// function only when certain that raw represents a PaymentAddress.
+    pub fn to_payment_address(&self) -> FromContext<PaymentAddress> {
+        FromContext::<PaymentAddress> {
+            raw: self.raw.clone(),
             phantom: PhantomData,
         }
     }
@@ -373,6 +426,37 @@ impl ArgFromContext for PaymentAddress {
                 .cloned()
                 .ok_or_else(|| format!("Unknown payment address {}", raw))
         })
+    }
+}
+
+impl ArgFromMutContext for TransferSource {
+    fn arg_from_mut_ctx(
+        ctx: &mut Context,
+        raw: impl AsRef<str>,
+    ) -> Result<Self, String> {
+        let raw = raw.as_ref();
+        // Either the string is a transparent address or a spending key
+        Address::arg_from_ctx(ctx, raw)
+            .map(Self::Address)
+            .or_else(|_| {
+                ExtendedSpendingKey::arg_from_mut_ctx(ctx, raw)
+                    .map(Self::ExtendedSpendingKey)
+            })
+    }
+}
+
+impl ArgFromContext for TransferTarget {
+    fn arg_from_ctx(
+        ctx: &Context,
+        raw: impl AsRef<str>,
+    ) -> Result<Self, String> {
+        let raw = raw.as_ref();
+        // Either the string is a transparent address or a payment address
+        Address::arg_from_ctx(ctx, raw)
+            .map(Self::Address)
+            .or_else(|_| {
+                PaymentAddress::arg_from_ctx(ctx, raw).map(Self::PaymentAddress)
+            })
     }
 }
 
