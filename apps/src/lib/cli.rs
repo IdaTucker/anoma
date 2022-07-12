@@ -1563,6 +1563,7 @@ pub mod args {
     const ALLOW_DUPLICATE_IP: ArgFlag = flag("allow-duplicate-ip");
     const AMOUNT: Arg<token::Amount> = arg("amount");
     const ARCHIVE_DIR: ArgOpt<PathBuf> = arg_opt("archive-dir");
+    const BALANCE_OWNER: ArgOpt<WalletBalanceOwner> = arg_opt("owner");
     const BASE_DIR: ArgDefault<PathBuf> = arg_default(
         "base-dir",
         DefaultFn(|| match env::var("ANOMA_BASE_DIR") {
@@ -2356,7 +2357,7 @@ pub mod args {
         /// Common query args
         pub query: Query,
         /// Address of an owner
-        pub owner: Option<WalletAddress>,
+        pub owner: Option<WalletBalanceOwner>,
         /// Address of a token
         pub token: Option<WalletAddress>,
     }
@@ -2364,7 +2365,7 @@ pub mod args {
     impl Args for QueryBalance {
         fn parse(matches: &ArgMatches) -> Self {
             let query = Query::parse(matches);
-            let owner = OWNER.parse(matches);
+            let owner = BALANCE_OWNER.parse(matches);
             let token = TOKEN_OPT.parse(matches);
             Self {
                 query,
@@ -2376,7 +2377,7 @@ pub mod args {
         fn def(app: App) -> App {
             app.add_args::<Query>()
                 .arg(
-                    OWNER
+                    BALANCE_OWNER
                         .def()
                         .about("The account address whose balance to query."),
                 )

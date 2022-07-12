@@ -56,6 +56,10 @@ pub type WalletKeypair = FromContext<common::SecretKey>;
 /// alias of an public key that may be found in the wallet
 pub type WalletPublicKey = FromContext<common::PublicKey>;
 
+/// A raw address or a raw full viewing key (bech32m encoding) or an alias of
+/// either in the wallet
+pub type WalletBalanceOwner = FromContext<BalanceOwner>;
+
 /// Command execution context
 #[derive(Debug)]
 pub struct Context {
@@ -460,3 +464,21 @@ impl ArgFromContext for TransferTarget {
     }
 }
 
+impl ArgFromMutContext for BalanceOwner {
+    fn arg_from_mut_ctx(
+        ctx: &mut Context,
+        raw: impl AsRef<str>,
+    ) -> Result<Self, String> {
+        let raw = raw.as_ref();
+        // Either the string is a transparent address or a viewing key
+        Address::arg_from_ctx(ctx, raw)
+            .map(Self::Address)
+            .or_else(|_| {
+                ExtendedViewingKey::arg_from_mut_ctx(ctx, raw)
+                    .map(Self::FullViewingKey)
+            })
+            .or_else(|_| {
+                PaymentAddress::arg_from_ctx(ctx, raw).map(Self::PaymentAddress)
+            })
+    }
+}
