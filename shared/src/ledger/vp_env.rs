@@ -123,7 +123,7 @@ pub trait VpEnv {
     /// If the execution fails for whatever reason, this will return `false`.
     /// Otherwise returns the result of evaluation.
     fn eval(
-        &mut self,
+        &self,
         vp_code: Vec<u8>,
         input_data: Vec<u8>,
     ) -> Result<bool, Self::Error>;
@@ -136,6 +136,9 @@ pub trait VpEnv {
         pk: &common::PublicKey,
         sig: &common::Signature,
     ) -> Result<bool, Self::Error>;
+
+    /// Get a tx hash
+    fn get_tx_code_hash(&self) -> Result<Hash, Self::Error>;
 }
 
 /// These runtime errors will abort VP execution immediately

@@ -93,11 +93,12 @@ pub mod tx {
 pub mod vp {
     use std::collections::BTreeSet;
 
+    use anoma::ledger::native_vp::VpEnv;
     use anoma::types::address::Address;
     pub use anoma::types::nft::*;
     use anoma::types::storage::Key;
 
-    use crate::imports::vp;
+    use crate::imports::vp::{self, accept, reject, Ctx, EnvResult, VpResult};
 
     enum KeyType {
         Metadata(Address, String),
@@ -109,17 +110,17 @@ pub mod vp {
     }
 
     pub fn vp(
+        ctx: &Ctx,
         _tx_da_ta: Vec<u8>,
         nft_address: &Address,
         keys_changed: &BTreeSet<Key>,
         verifiers: &BTreeSet<Address>,
-    ) -> bool {
-        keys_changed
-            .iter()
-            .all(|key| match get_key_type(key, nft_address) {
+    ) -> VpResult {
+        for key in keys_changed {
+            match get_key_type(key, nft_address) {
                 KeyType::Creator(_creator_addr) => {
                     vp::log_string("creator cannot be changed.");
-                    false
+                    return reject();
                 }
                 KeyType::Approval(nft_address, token_id) => {
                     vp::log_string(format!(
@@ -127,45 +128,58 @@ pub mod vp {
                         token_id
                     ));
 
-                    is_creator(&nft_address, verifiers)
+                    if !(is_creator(ctx, &nft_address, verifiers)?
                         || is_approved(
+                            ctx,
                             &nft_address,
                             token_id.as_ref(),
                             verifiers,
-                        )
+                        )?)
+                    {
+                        return reject();
+                    }
                 }
                 KeyType::Metadata(nft_address, token_id) => {
                     vp::log_string(format!(
                         "nft vp, checking if metadata changed: {}",
                         token_id
                     ));
-                    is_creator(&nft_address, verifiers)
+                    if !is_creator(ctx, &nft_address, verifiers)? {
+                        return reject();
+                    }
                 }
-                _ => is_creator(nft_address, verifiers),
-            })
+                _ => {
+                    if !is_creator(ctx, nft_address, verifiers)? {
+                        return reject();
+                    }
+                }
+            }
+        }
+        accept()
     }
 
     fn is_approved(
+        ctx: &Ctx,
         nft_address: &Address,
         nft_token_id: &str,
         verifiers: &BTreeSet<Address>,
-    ) -> bool {
-        let approvals_key =
-            get_token_approval_key(nft_address, nft_token_id).to_string();
+    ) -> EnvResult<bool> {
+        let approvals_key = get_token_approval_key(nft_address, nft_token_id);
         let approval_addresses: Vec<Address> =
-            vp::read_pre(approvals_key).unwrap_or_default();
-        return approval_addresses
+            ctx.read_pre(&approvals_key)?.unwrap_or_default();
+        return Ok(approval_addresses
             .iter()
-            .any(|addr| verifiers.contains(addr));
+            .any(|addr| verifiers.contains(addr)));
     }
 
     fn is_creator(
+        ctx: &Ctx,
         nft_address: &Address,
         verifiers: &BTreeSet<Address>,
-    ) -> bool {
-        let creator_key = get_creator_key(nft_address).to_string();
-        let creator_address: Address = vp::read_pre(creator_key).unwrap();
-        verifiers.contains(&creator_address)
+    ) -> EnvResult<bool> {
+        let creator_key = get_creator_key(nft_address);
+        let creator_address: Address = ctx.read_pre(&creator_key)?.unwrap();
+        Ok(verifiers.contains(&creator_address))
     }
 
     fn get_key_type(key: &Key, nft_address: &Address) -> KeyType {

@@ -34,18 +34,27 @@ fn read_from_buffer(
 
 /// This function is a helper to handle the second step of reading var-len
 /// values in a key-value pair from the host.
+fn read_key_val_bytes_from_buffer(
+    read_result: i64,
+    result_buffer: unsafe extern "C" fn(u64),
+) -> Option<(String, Vec<u8>)> {
+    let key_val = read_from_buffer(read_result, result_buffer)
+        .and_then(|t| KeyVal::try_from_slice(&t[..]).ok());
+    key_val.map(|key_val| (key_val.key, key_val.val))
+}
+
+/// This function is a helper to handle the second step of reading var-len
+/// values in a key-value pair from the host, where the value is attempted to
+/// be decoded with borsh (returns `None` when the decoding fails).
 fn read_key_val_from_buffer<T: BorshDeserialize>(
     read_result: i64,
     result_buffer: unsafe extern "C" fn(u64),
 ) -> Option<(String, T)> {
-    let key_val = read_from_buffer(read_result, result_buffer)
-        .and_then(|t| KeyVal::try_from_slice(&t[..]).ok());
-    key_val.and_then(|key_val| {
-        // decode the value
-        T::try_from_slice(&key_val.val)
-            .map(|val| (key_val.key, val))
-            .ok()
-    })
+    let (key, val) =
+        read_key_val_bytes_from_buffer(read_result, result_buffer)?;
+    // try to decode the value
+    let decoded_val = T::try_from_slice(&val).ok()?;
+    Some((key, decoded_val))
 }
 
 /// Transaction environment imports
@@ -394,7 +403,7 @@ pub mod vp {
         /// context in order to benefit from type-safety of the host environment
         /// methods implemented on the context.
         #[allow(clippy::new_without_default)]
-        pub unsafe fn new() -> Self {
+        pub const unsafe fn new() -> Self {
             Self(())
         }
     }
@@ -415,7 +424,7 @@ pub mod vp {
         // `anoma_macros::validity_predicate` macro.
         type Error = Infallible;
         // TODO there's no pre/post in native VP yet?
-        type PrefixIter = KeyValIterator<(String, Vec<u8>, u64)>;
+        type PrefixIter = KeyValIterator<(String, Vec<u8>)>;
 
         fn read_pre<T: BorshDeserialize>(
             &self,
@@ -550,7 +559,7 @@ pub mod vp {
             iter: &mut Self::PrefixIter,
         ) -> Result<Option<(String, Vec<u8>)>, Self::Error> {
             let read_result = unsafe { anoma_vp_iter_pre_next(iter.0) };
-            Ok(super::read_key_val_from_buffer(
+            Ok(super::read_key_val_bytes_from_buffer(
                 read_result,
                 anoma_vp_result_buffer,
             ))
@@ -561,14 +570,14 @@ pub mod vp {
             iter: &mut Self::PrefixIter,
         ) -> Result<Option<(String, Vec<u8>)>, Self::Error> {
             let read_result = unsafe { anoma_vp_iter_post_next(iter.0) };
-            Ok(super::read_key_val_from_buffer(
+            Ok(super::read_key_val_bytes_from_buffer(
                 read_result,
                 anoma_vp_result_buffer,
             ))
         }
 
         fn eval(
-            &mut self,
+            &self,
             vp_code: Vec<u8>,
             input_data: Vec<u8>,
         ) -> Result<bool, Self::Error> {
@@ -600,97 +609,21 @@ pub mod vp {
             };
             Ok(HostEnvResult::is_success(valid))
         }
+
+        fn get_tx_code_hash(&self) -> Result<Hash, Self::Error> {
+            let result = Vec::with_capacity(HASH_LENGTH);
+            unsafe {
+                anoma_vp_get_tx_code_hash(result.as_ptr() as _);
+            }
+            let slice =
+                unsafe { slice::from_raw_parts(result.as_ptr(), HASH_LENGTH) };
+            Ok(Hash::try_from(slice).expect("Cannot convert the hash"))
+        }
     }
 
     pub struct PreKeyValIterator<T>(pub u64, pub PhantomData<T>);
 
     pub struct PostKeyValIterator<T>(pub u64, pub PhantomData<T>);
-
-    /// Try to read a Borsh encoded variable-length value at the given key from
-    /// storage before transaction execution.
-    pub fn read_pre<T: BorshDeserialize>(key: impl AsRef<str>) -> Option<T> {
-        let key = key.as_ref();
-        let read_result =
-            unsafe { anoma_vp_read_pre(key.as_ptr() as _, key.len() as _) };
-        super::read_from_buffer(read_result, anoma_vp_result_buffer)
-            .and_then(|t| T::try_from_slice(&t[..]).ok())
-    }
-
-    /// Try to read a variable-length value as bytesat the given key from
-    /// storage before transaction execution.
-    pub fn read_bytes_pre(key: impl AsRef<str>) -> Option<Vec<u8>> {
-        let key = key.as_ref();
-        let read_result =
-            unsafe { anoma_vp_read_pre(key.as_ptr() as _, key.len() as _) };
-        super::read_from_buffer(read_result, anoma_vp_result_buffer)
-    }
-
-    /// Try to read a Borsh encoded variable-length value at the given key from
-    /// storage after transaction execution.
-    pub fn read_post<T: BorshDeserialize>(key: impl AsRef<str>) -> Option<T> {
-        let key = key.as_ref();
-        let read_result =
-            unsafe { anoma_vp_read_post(key.as_ptr() as _, key.len() as _) };
-        super::read_from_buffer(read_result, anoma_vp_result_buffer)
-            .and_then(|t| T::try_from_slice(&t[..]).ok())
-    }
-
-    /// Try to read a variable-length value as bytes at the given key from
-    /// storage after transaction execution.
-    pub fn read_bytes_post(key: impl AsRef<str>) -> Option<Vec<u8>> {
-        let key = key.as_ref();
-        let read_result =
-            unsafe { anoma_vp_read_post(key.as_ptr() as _, key.len() as _) };
-        super::read_from_buffer(read_result, anoma_vp_result_buffer)
-    }
-
-    /// Try to read a Borsh encoded variable-length value at the given key from
-    /// storage before transaction execution.
-    pub fn read_temp<T: BorshDeserialize>(key: impl AsRef<str>) -> Option<T> {
-        let key = key.as_ref();
-        let read_result =
-            unsafe { anoma_vp_read_temp(key.as_ptr() as _, key.len() as _) };
-        super::read_from_buffer(read_result, anoma_vp_result_buffer)
-            .and_then(|t| T::try_from_slice(&t[..]).ok())
-    }
-
-    /// Try to read a variable-length value as bytes at the given key from
-    /// storage before transaction execution.
-    pub fn read_bytes_temp(key: impl AsRef<str>) -> Option<Vec<u8>> {
-        let key = key.as_ref();
-        let read_result =
-            unsafe { anoma_vp_read_temp(key.as_ptr() as _, key.len() as _) };
-        super::read_from_buffer(read_result, anoma_vp_result_buffer)
-    }
-
-    /// Check if the given key was present in storage before transaction
-    /// execution.
-    pub fn has_key_pre(key: impl AsRef<str>) -> bool {
-        let key = key.as_ref();
-        let found =
-            unsafe { anoma_vp_has_key_pre(key.as_ptr() as _, key.len() as _) };
-        HostEnvResult::is_success(found)
-    }
-
-    /// Check if the given key is present in storage after transaction
-    /// execution.
-    pub fn has_key_post(key: impl AsRef<str>) -> bool {
-        let key = key.as_ref();
-        let found =
-            unsafe { anoma_vp_has_key_post(key.as_ptr() as _, key.len() as _) };
-        HostEnvResult::is_success(found)
-    }
-
-    /// Get an iterator with the given prefix before transaction execution
-    pub fn iter_prefix_pre<T: BorshDeserialize>(
-        prefix: impl AsRef<str>,
-    ) -> PreKeyValIterator<T> {
-        let prefix = prefix.as_ref();
-        let iter_id = unsafe {
-            anoma_vp_iter_prefix(prefix.as_ptr() as _, prefix.len() as _)
-        };
-        PreKeyValIterator(iter_id, PhantomData)
-    }
 
     impl<T: BorshDeserialize> Iterator for PreKeyValIterator<T> {
         type Item = (String, T);
@@ -699,17 +632,6 @@ pub mod vp {
             let read_result = unsafe { anoma_vp_iter_pre_next(self.0) };
             super::read_key_val_from_buffer(read_result, anoma_vp_result_buffer)
         }
-    }
-
-    /// Get an iterator with the given prefix after transaction execution
-    pub fn iter_prefix_post<T: BorshDeserialize>(
-        prefix: impl AsRef<str>,
-    ) -> PostKeyValIterator<T> {
-        let prefix = prefix.as_ref();
-        let iter_id = unsafe {
-            anoma_vp_iter_prefix(prefix.as_ptr() as _, prefix.len() as _)
-        };
-        PostKeyValIterator(iter_id, PhantomData)
     }
 
     impl<T: BorshDeserialize> Iterator for PostKeyValIterator<T> {
@@ -721,70 +643,6 @@ pub mod vp {
         }
     }
 
-    /// Get the chain ID
-    pub fn get_chain_id() -> String {
-        let result = Vec::with_capacity(CHAIN_ID_LENGTH);
-        unsafe {
-            anoma_vp_get_chain_id(result.as_ptr() as _);
-        }
-        let slice =
-            unsafe { slice::from_raw_parts(result.as_ptr(), CHAIN_ID_LENGTH) };
-        String::from_utf8(slice.to_vec()).expect("Cannot convert the ID string")
-    }
-
-    /// Get height of the current block
-    pub fn get_block_height() -> BlockHeight {
-        BlockHeight(unsafe { anoma_vp_get_block_height() })
-    }
-
-    /// Get a block hash
-    pub fn get_block_hash() -> BlockHash {
-        let result = Vec::with_capacity(BLOCK_HASH_LENGTH);
-        unsafe {
-            anoma_vp_get_block_hash(result.as_ptr() as _);
-        }
-        let slice = unsafe {
-            slice::from_raw_parts(result.as_ptr(), BLOCK_HASH_LENGTH)
-        };
-        BlockHash::try_from(slice).expect("Cannot convert the hash")
-    }
-
-    /// Get a tx hash
-    pub fn get_tx_code_hash() -> Hash {
-        let result = Vec::with_capacity(HASH_LENGTH);
-        unsafe {
-            anoma_vp_get_tx_code_hash(result.as_ptr() as _);
-        }
-        let slice =
-            unsafe { slice::from_raw_parts(result.as_ptr(), HASH_LENGTH) };
-        Hash::try_from(slice).expect("Cannot convert the hash")
-    }
-
-    /// Get epoch of the current block
-    pub fn get_block_epoch() -> Epoch {
-        Epoch(unsafe { anoma_vp_get_block_epoch() })
-    }
-
-    /// Verify a transaction signature. The signature is expected to have been
-    /// produced on the encoded transaction [`anoma::proto::Tx`]
-    /// using [`anoma::proto::Tx::sign`].
-    pub fn verify_tx_signature(
-        pk: &common::PublicKey,
-        sig: &common::Signature,
-    ) -> bool {
-        let pk = BorshSerialize::try_to_vec(pk).unwrap();
-        let sig = BorshSerialize::try_to_vec(sig).unwrap();
-        let valid = unsafe {
-            anoma_vp_verify_tx_signature(
-                pk.as_ptr() as _,
-                pk.len() as _,
-                sig.as_ptr() as _,
-                sig.len() as _,
-            )
-        };
-        HostEnvResult::is_success(valid)
-    }
-
     /// Log a string. The message will be printed at the `tracing::Level::Info`.
     pub fn log_string<T: AsRef<str>>(msg: T) {
         let msg = msg.as_ref();
@@ -792,25 +650,6 @@ pub mod vp {
             anoma_vp_log_string(msg.as_ptr() as _, msg.len() as _);
         }
     }
-
-    /// Evaluate a validity predicate with given data. The address, changed
-    /// storage keys and verifiers will have the same values as the input to
-    /// caller's validity predicate.
-    ///
-    /// If the execution fails for whatever reason, this will return `false`.
-    /// Otherwise returns the result of evaluation.
-    pub fn eval(vp_code: Vec<u8>, input_data: Vec<u8>) -> bool {
-        let result = unsafe {
-            anoma_vp_eval(
-                vp_code.as_ptr() as _,
-                vp_code.len() as _,
-                input_data.as_ptr() as _,
-                input_data.len() as _,
-            )
-        };
-        HostEnvResult::is_success(result)
-    }
-
     // These host functions are implemented in the Anoma's [`host_env`]
     // module. The environment provides calls to them via this C interface.
     extern "C" {

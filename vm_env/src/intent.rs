@@ -24,16 +24,19 @@ pub mod vp {
     pub use anoma::types::intent::*;
 
     use super::*;
+    use crate::imports::vp::*;
 
-    pub fn vp_exchange(intent: &Signed<Exchange>) -> bool {
-        use crate::imports::vp;
+    pub fn vp_exchange(
+        ctx: &Ctx,
+        intent: &Signed<Exchange>,
+    ) -> EnvResult<bool> {
         let key = intent::invalid_intent_key(&intent.data.addr);
 
         let invalid_intent_pre: HashSet<common::Signature> =
-            vp::read_pre(&key.to_string()).unwrap_or_default();
+            ctx.read_pre(&key)?.unwrap_or_default();
         let invalid_intent_post: HashSet<common::Signature> =
-            vp::read_post(&key.to_string()).unwrap_or_default();
-        !invalid_intent_pre.contains(&intent.sig)
-            && invalid_intent_post.contains(&intent.sig)
+            ctx.read_post(&key)?.unwrap_or_default();
+        Ok(!invalid_intent_pre.contains(&intent.sig)
+            && invalid_intent_post.contains(&intent.sig))
     }
 }

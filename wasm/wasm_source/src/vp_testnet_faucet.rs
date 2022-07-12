@@ -32,15 +32,15 @@ fn validate_tx(
 
     let valid_sig = Lazy::new(|| match &*signed_tx_data {
         Ok(signed_tx_data) => {
-            let pk = key::get(&addr);
+            let pk = key::get(ctx, &addr);
             match pk {
-                Some(pk) => {
+                Ok(Some(pk)) => {
                     matches!(
                         ctx.verify_tx_signature(&pk, &signed_tx_data.sig),
                         Ok(true)
                     )
                 }
-                None => false,
+                _ => false,
             }
         }
         _ => false,
@@ -54,9 +54,9 @@ fn validate_tx(
         let is_valid = if let Some(owner) = token::is_any_token_balance_key(key)
         {
             if owner == &addr {
-                let key = key.to_string();
-                let pre: token::Amount = read_pre(&key).unwrap_or_default();
-                let post: token::Amount = read_post(&key).unwrap_or_default();
+                let pre: token::Amount = ctx.read_pre(key)?.unwrap_or_default();
+                let post: token::Amount =
+                    ctx.read_post(key)?.unwrap_or_default();
                 let change = post.change() - pre.change();
                 // Debit over `MAX_FREE_DEBIT` has to signed, credit doesn't
                 change >= -MAX_FREE_DEBIT || change >= 0 || *valid_sig
@@ -65,17 +65,16 @@ fn validate_tx(
                 true
             }
         } else if let Some(owner) = key.is_validity_predicate() {
-            let key = key.to_string();
-            let has_post: bool = has_key_post(&key);
+            let has_post: bool = ctx.has_key_post(key)?;
             if owner == &addr {
                 if has_post {
-                    let vp: Vec<u8> = read_bytes_post(&key).unwrap();
+                    let vp: Vec<u8> = ctx.read_bytes_post(key)?.unwrap();
                     return Ok(*valid_sig && is_vp_whitelisted(ctx, &vp)?);
                 } else {
                     return reject();
                 }
             } else {
-                let vp: Vec<u8> = read_bytes_post(&key).unwrap();
+                let vp: Vec<u8> = ctx.read_bytes_post(key)?.unwrap();
                 return is_vp_whitelisted(ctx, &vp);
             }
         } else {
@@ -119,8 +118,7 @@ mod tests {
         vp_host_env::init();
 
         assert!(
-            validate_tx(&ctx(), tx_data, addr, keys_changed, verifiers)
-                .unwrap()
+            validate_tx(&CTX, tx_data, addr, keys_changed, verifiers).unwrap()
         );
     }
 
@@ -155,7 +153,7 @@ mod tests {
         let verifiers: BTreeSet<Address> = BTreeSet::default();
         vp_host_env::set(vp_env);
         assert!(
-            validate_tx(&ctx(), tx_data, vp_owner, keys_changed, verifiers)
+            validate_tx(&CTX, tx_data, vp_owner, keys_changed, verifiers)
                 .unwrap()
         );
     }
@@ -187,7 +185,7 @@ mod tests {
         let verifiers: BTreeSet<Address> = BTreeSet::default();
         vp_host_env::set(vp_env);
         assert!(
-            !validate_tx(&ctx(), tx_data, vp_owner, keys_changed, verifiers)
+            !validate_tx(&CTX, tx_data, vp_owner, keys_changed, verifiers)
                 .unwrap()
         );
     }
@@ -226,7 +224,7 @@ mod tests {
         let verifiers: BTreeSet<Address> = BTreeSet::default();
         vp_host_env::set(vp_env);
         assert!(
-            validate_tx(&ctx(), tx_data, vp_owner, keys_changed, verifiers)
+            validate_tx(&CTX, tx_data, vp_owner, keys_changed, verifiers)
                 .unwrap()
         );
     }
@@ -278,7 +276,7 @@ mod tests {
         vp_env.all_touched_storage_keys();
         let verifiers: BTreeSet<Address> = BTreeSet::default();
         vp_host_env::set(vp_env);
-        assert!(!validate_tx(&ctx(), tx_data, vp_owner, keys_changed, verifiers).unwrap());
+        assert!(!validate_tx(&CTX, tx_data, vp_owner, keys_changed, verifiers).unwrap());
     }
 
     /// Test that a debit of less than or equal to [`MAX_FREE_DEBIT`] tokens without a valid signature is accepted.
@@ -311,7 +309,7 @@ mod tests {
         vp_env.all_touched_storage_keys();
         let verifiers: BTreeSet<Address> = BTreeSet::default();
         vp_host_env::set(vp_env);
-        assert!(validate_tx(&ctx(), tx_data, vp_owner, keys_changed, verifiers).unwrap());
+        assert!(validate_tx(&CTX, tx_data, vp_owner, keys_changed, verifiers).unwrap());
     }
 
         /// Test that a signed tx that performs arbitrary storage writes or
@@ -354,7 +352,7 @@ mod tests {
             vp_env.all_touched_storage_keys();
             let verifiers: BTreeSet<Address> = BTreeSet::default();
             vp_host_env::set(vp_env);
-            assert!(validate_tx(&ctx(), tx_data, vp_owner, keys_changed, verifiers).unwrap());
+            assert!(validate_tx(&CTX, tx_data, vp_owner, keys_changed, verifiers).unwrap());
         }
     }
 }

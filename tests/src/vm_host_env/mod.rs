@@ -35,7 +35,7 @@ mod tests {
     use anoma_vm_env::tx_prelude::{
         BorshDeserialize, BorshSerialize, KeyValIterator,
     };
-    use anoma_vm_env::vp_prelude::{PostKeyValIterator, PreKeyValIterator};
+    use anoma_vm_env::vp_prelude::VpEnv;
     use itertools::Itertools;
     use prost::Message;
     use test_log::test;
@@ -252,9 +252,9 @@ mod tests {
             env.write_log.write(&key, value_raw.clone()).unwrap()
         });
 
-        let read_pre_value: Option<String> = vp_host_env::read_pre(key_raw);
+        let read_pre_value: Option<String> = CTX.read_pre(&key).unwrap();
         assert_eq!(None, read_pre_value);
-        let read_post_value: Option<String> = vp_host_env::read_post(key_raw);
+        let read_post_value: Option<String> = CTX.read_post(&key).unwrap();
         assert_eq!(Some(value), read_post_value);
     }
 
@@ -268,7 +268,6 @@ mod tests {
         // Write some value to storage
         let existing_key =
             addr_key.join(&Key::parse("existing_key_raw").unwrap());
-        let existing_key_raw = existing_key.to_string();
         let existing_value = vec![2_u8; 1000];
         // Values written to storage have to be encoded with Borsh
         let existing_value_encoded = existing_value.try_to_vec().unwrap();
@@ -280,25 +279,24 @@ mod tests {
         // In a transaction, write override the existing key's value and add
         // another key-value
         let override_value = "override".to_string();
-        let new_key =
-            addr_key.join(&Key::parse("new_key").unwrap()).to_string();
+        let new_key = addr_key.join(&Key::parse("new_key").unwrap());
         let new_value = "vp".repeat(4);
 
         // Initialize the VP environment via a transaction
         vp_host_env::init_from_tx(addr, tx_env, |_addr| {
             // Override the existing key
-            tx_host_env::write(&existing_key_raw, &override_value);
+            tx_host_env::write(&existing_key.to_string(), &override_value);
 
             // Write the new key-value
-            tx_host_env::write(&new_key, new_value.clone());
+            tx_host_env::write(&new_key.to_string(), new_value.clone());
         });
 
         assert!(
-            vp_host_env::has_key_pre(&existing_key_raw),
+            CTX.has_key_pre(&existing_key).unwrap(),
             "The existing key before transaction should be found"
         );
         let pre_existing_value: Option<Vec<u8>> =
-            vp_host_env::read_pre(&existing_key_raw);
+            CTX.read_pre(&existing_key).unwrap();
         assert_eq!(
             Some(existing_value),
             pre_existing_value,
@@ -307,10 +305,10 @@ mod tests {
         );
 
         assert!(
-            !vp_host_env::has_key_pre(&new_key),
+            !CTX.has_key_pre(&new_key).unwrap(),
             "The new key before transaction shouldn't be found"
         );
-        let pre_new_value: Option<Vec<u8>> = vp_host_env::read_pre(&new_key);
+        let pre_new_value: Option<Vec<u8>> = CTX.read_pre(&new_key).unwrap();
         assert_eq!(
             None, pre_new_value,
             "The new value read from state before transaction shouldn't yet \
@@ -318,11 +316,11 @@ mod tests {
         );
 
         assert!(
-            vp_host_env::has_key_post(&existing_key_raw),
+            CTX.has_key_post(&existing_key).unwrap(),
             "The existing key after transaction should still be found"
         );
         let post_existing_value: Option<String> =
-            vp_host_env::read_post(&existing_key_raw);
+            CTX.read_post(&existing_key).unwrap();
         assert_eq!(
             Some(override_value),
             post_existing_value,
@@ -331,10 +329,10 @@ mod tests {
         );
 
         assert!(
-            vp_host_env::has_key_post(&new_key),
+            CTX.has_key_post(&new_key).unwrap(),
             "The new key after transaction should be found"
         );
-        let post_new_value: Option<String> = vp_host_env::read_post(&new_key);
+        let post_new_value: Option<String> = CTX.read_post(&new_key).unwrap();
         assert_eq!(
             Some(new_value),
             post_new_value,
@@ -372,16 +370,30 @@ mod tests {
             tx_host_env::write(&existing_key_raw, 100_i32);
 
             // Write the new key-value under the same prefix
-            tx_host_env::write(&new_key_raw, 11.try_to_vec().unwrap());
+            tx_host_env::write(&new_key_raw, 11_i32);
         });
 
-        let iter_pre: PreKeyValIterator<i32> =
-            vp_host_env::iter_prefix_pre(prefix.to_string());
+        let iter_pre = CTX.iter_prefix(&prefix).unwrap();
+        let iter_pre = itertools::unfold(iter_pre, |iter| {
+            if let Ok(Some((key, value))) = CTX.iter_pre_next(iter) {
+                if let Ok(decoded_value) = i32::try_from_slice(&value[..]) {
+                    return Some((key, decoded_value));
+                }
+            }
+            None
+        });
         let expected_pre = (0..10).map(|i| (format!("{}/{}", prefix, i), i));
         itertools::assert_equal(iter_pre.sorted(), expected_pre.sorted());
 
-        let iter_post: PostKeyValIterator<i32> =
-            vp_host_env::iter_prefix_post(prefix.to_string());
+        let iter_post = CTX.iter_prefix(&prefix).unwrap();
+        let iter_post = itertools::unfold(iter_post, |iter| {
+            if let Ok(Some((key, value))) = CTX.iter_post_next(iter) {
+                if let Ok(decoded_value) = i32::try_from_slice(&value[..]) {
+                    return Some((key, decoded_value));
+                }
+            }
+            None
+        });
         let expected_post = (0..10).map(|i| {
             let val = if i == 5 { 100 } else { i };
             (format!("{}/{}", prefix, i), val)
@@ -421,13 +433,16 @@ mod tests {
                     .expect("decoding signed data we just signed")
             });
             assert_eq!(&signed_tx_data.data, data);
-            assert!(vp_host_env::verify_tx_signature(&pk, &signed_tx_data.sig));
+            assert!(CTX.verify_tx_signature(&pk, &signed_tx_data.sig).unwrap());
 
             let other_keypair = key::testing::keypair_2();
-            assert!(!vp_host_env::verify_tx_signature(
-                &other_keypair.ref_to(),
-                &signed_tx_data.sig
-            ));
+            assert!(
+                !CTX.verify_tx_signature(
+                    &other_keypair.ref_to(),
+                    &signed_tx_data.sig
+                )
+                .unwrap()
+            );
         }
     }
 
@@ -437,19 +452,19 @@ mod tests {
         vp_host_env::init();
 
         assert_eq!(
-            vp_host_env::get_chain_id(),
+            CTX.get_chain_id().unwrap(),
             vp_host_env::with(|env| env.storage.get_chain_id().0)
         );
         assert_eq!(
-            vp_host_env::get_block_height(),
+            CTX.get_block_height().unwrap(),
             vp_host_env::with(|env| env.storage.get_block_height().0)
         );
         assert_eq!(
-            vp_host_env::get_block_hash(),
+            CTX.get_block_hash().unwrap(),
             vp_host_env::with(|env| env.storage.get_block_hash().0)
         );
         assert_eq!(
-            vp_host_env::get_block_epoch(),
+            CTX.get_block_epoch().unwrap(),
             vp_host_env::with(|env| env.storage.get_current_epoch().0)
         );
     }
@@ -462,14 +477,14 @@ mod tests {
         // evaluating without any code should fail
         let empty_code = vec![];
         let input_data = vec![];
-        let result = vp_host_env::eval(empty_code, input_data);
+        let result = CTX.eval(empty_code, input_data).unwrap();
         assert!(!result);
 
         // evaluating the VP template which always returns `true` should pass
         let code =
             std::fs::read(VP_ALWAYS_TRUE_WASM).expect("cannot load wasm");
         let input_data = vec![];
-        let result = vp_host_env::eval(code, input_data);
+        let result = CTX.eval(code, input_data).unwrap();
         assert!(result);
 
         // evaluating the VP template which always returns `false` shouldn't
@@ -477,7 +492,7 @@ mod tests {
         let code =
             std::fs::read(VP_ALWAYS_FALSE_WASM).expect("cannot load wasm");
         let input_data = vec![];
-        let result = vp_host_env::eval(code, input_data);
+        let result = CTX.eval(code, input_data).unwrap();
         assert!(!result);
     }
 

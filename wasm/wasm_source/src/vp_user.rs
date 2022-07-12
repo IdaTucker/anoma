@@ -75,17 +75,27 @@ fn validate_tx(
 
     let valid_sig = Lazy::new(|| match &*signed_tx_data {
         Ok(signed_tx_data) => {
-            let pk = key::get(&addr);
+            let pk = key::get(ctx, &addr);
             match pk {
-                Some(pk) => ctx.verify_tx_signature(&pk, &signed_tx_data.sig),
-                None => Ok(false),
+                Ok(Some(pk)) => {
+                    matches!(
+                        ctx.verify_tx_signature(&pk, &signed_tx_data.sig),
+                        Ok(true)
+                    )
+                }
+                _ => false,
             }
         }
-        _ => Ok(false),
+        _ => false,
     });
 
     let valid_intent = Lazy::new(|| match &*signed_tx_data {
-        Ok(signed_tx_data) => check_intent_transfers(&addr, signed_tx_data),
+        Ok(signed_tx_data) => {
+            matches!(
+                check_intent_transfers(ctx, &addr, signed_tx_data),
+                Ok(true)
+            )
+        }
         _ => false,
     });
 
@@ -104,13 +114,13 @@ fn validate_tx(
                         ctx.read_post(key)?.unwrap_or_default();
                     let change = post.change() - pre.change();
                     // debit has to signed, credit doesn't
-                    let valid = change >= 0 || (*valid_sig)? || *valid_intent;
+                    let valid = change >= 0 || *valid_sig || *valid_intent;
                     debug_log!(
                         "token key: {}, change: {}, valid_sig: {}, \
                          valid_intent: {}, valid modification: {}",
                         key,
                         change,
-                        (*valid_sig)?,
+                        *valid_sig,
                         *valid_intent,
                         valid
                     );
@@ -135,7 +145,7 @@ fn validate_tx(
                     Some(bond_id) => {
                         // Bonds and unbonds changes for this address
                         // must be signed
-                        bond_id.source != addr || (*valid_sig)?
+                        bond_id.source != addr || *valid_sig
                     }
                     None => {
                         // Any other PoS changes are allowed without signature
@@ -171,14 +181,14 @@ fn validate_tx(
             }
             KeyType::Nft(owner) => {
                 if owner == &addr {
-                    (*valid_sig)?
+                    *valid_sig
                 } else {
                     true
                 }
             }
             KeyType::GovernanceVote(voter) => {
                 if voter == &addr {
-                    (*valid_sig)?
+                    *valid_sig
                 } else {
                     true
                 }
@@ -188,22 +198,20 @@ fn validate_tx(
                 if owner == &addr {
                     if has_post {
                         let vp: Vec<u8> = ctx.read_bytes_post(key)?.unwrap();
-                        return Ok(
-                            (*valid_sig)? && is_vp_whitelisted(ctx, &vp)?
-                        );
+                        *valid_sig && is_vp_whitelisted(ctx, &vp)?
                     } else {
-                        return reject();
+                        false
                     }
                 } else {
                     let vp: Vec<u8> = ctx.read_bytes_post(key)?.unwrap();
-                    return is_vp_whitelisted(ctx, &vp);
+                    is_vp_whitelisted(ctx, &vp)?
                 }
             }
             KeyType::Unknown => {
                 if key.segments.get(0) == Some(&addr.to_db_key()) {
                     // Unknown changes to this address space require a valid
                     // signature
-                    (*valid_sig)?
+                    *valid_sig
                 } else {
                     // Unknown changes anywhere else are permitted
                     true
@@ -220,16 +228,17 @@ fn validate_tx(
 }
 
 fn check_intent_transfers(
+    ctx: &Ctx,
     addr: &Address,
     signed_tx_data: &SignedTxData,
-) -> bool {
+) -> EnvResult<bool> {
     if let Some((raw_intent_transfers, exchange, intent)) =
         try_decode_intent(addr, signed_tx_data)
     {
         log_string("check intent");
-        return check_intent(addr, exchange, intent, raw_intent_transfers);
+        return check_intent(ctx, addr, exchange, intent, raw_intent_transfers);
     }
-    false
+    reject()
 }
 
 fn try_decode_intent(
@@ -260,25 +269,26 @@ fn try_decode_intent(
 }
 
 fn check_intent(
+    ctx: &Ctx,
     addr: &Address,
     exchange: anoma_vp_prelude::Signed<Exchange>,
     intent: anoma_vp_prelude::Signed<FungibleTokenIntent>,
     raw_intent_transfers: Vec<u8>,
-) -> bool {
+) -> EnvResult<bool> {
     // verify signature
-    let pk = key::get(addr);
+    let pk = key::get(ctx, addr)?;
     if let Some(pk) = pk {
         if intent.verify(&pk).is_err() {
             log_string("invalid sig");
-            return false;
+            return reject();
         }
     } else {
-        return false;
+        return reject();
     }
 
     // verify the intent have not been already used
-    if !intent::vp_exchange(&exchange) {
-        return false;
+    if !intent::vp_exchange(ctx, &exchange)? {
+        return reject();
     }
 
     // verify the intent is fulfilled
@@ -295,10 +305,10 @@ fn check_intent(
     debug_log!("vp is: {}", vp.is_some());
 
     if let Some(code) = vp {
-        let eval_result = eval(code.to_vec(), raw_intent_transfers);
+        let eval_result = ctx.eval(code.to_vec(), raw_intent_transfers)?;
         debug_log!("eval result: {}", eval_result);
         if !eval_result {
-            return false;
+            return reject();
         }
     }
 
@@ -311,18 +321,19 @@ fn check_intent(
         rate_min.0
     );
 
-    let token_sell_key = token::balance_key(token_sell, addr).to_string();
+    let token_sell_key = token::balance_key(token_sell, addr);
     let mut sell_difference: token::Amount =
-        read_pre(&token_sell_key).unwrap_or_default();
+        ctx.read_pre(&token_sell_key)?.unwrap_or_default();
     let sell_post: token::Amount =
-        read_post(token_sell_key).unwrap_or_default();
+        ctx.read_post(&token_sell_key)?.unwrap_or_default();
 
     sell_difference.spend(&sell_post);
 
-    let token_buy_key = token::balance_key(token_buy, addr).to_string();
-    let buy_pre: token::Amount = read_pre(&token_buy_key).unwrap_or_default();
+    let token_buy_key = token::balance_key(token_buy, addr);
+    let buy_pre: token::Amount =
+        ctx.read_pre(&token_buy_key)?.unwrap_or_default();
     let mut buy_difference: token::Amount =
-        read_post(token_buy_key).unwrap_or_default();
+        ctx.read_post(&token_buy_key)?.unwrap_or_default();
 
     buy_difference.spend(&buy_pre);
 
@@ -355,9 +366,9 @@ fn check_intent(
             min_buy.change(),
             buy_diff / sell_diff
         );
-        false
+        reject()
     } else {
-        true
+        accept()
     }
 }
 
@@ -390,8 +401,7 @@ mod tests {
         vp_host_env::init();
 
         assert!(
-            validate_tx(&ctx(), tx_data, addr, keys_changed, verifiers)
-                .unwrap()
+            validate_tx(&CTX, tx_data, addr, keys_changed, verifiers).unwrap()
         );
     }
 
@@ -426,7 +436,7 @@ mod tests {
         let verifiers: BTreeSet<Address> = BTreeSet::default();
         vp_host_env::set(vp_env);
         assert!(
-            validate_tx(&ctx(), tx_data, vp_owner, keys_changed, verifiers)
+            validate_tx(&CTX, tx_data, vp_owner, keys_changed, verifiers)
                 .unwrap()
         );
     }
@@ -462,7 +472,7 @@ mod tests {
         let verifiers: BTreeSet<Address> = BTreeSet::default();
         vp_host_env::set(vp_env);
         assert!(
-            !validate_tx(&ctx(), tx_data, vp_owner, keys_changed, verifiers)
+            !validate_tx(&CTX, tx_data, vp_owner, keys_changed, verifiers)
                 .unwrap()
         );
     }
@@ -505,7 +515,7 @@ mod tests {
         let verifiers: BTreeSet<Address> = BTreeSet::default();
         vp_host_env::set(vp_env);
         assert!(
-            validate_tx(&ctx(), tx_data, vp_owner, keys_changed, verifiers)
+            validate_tx(&CTX, tx_data, vp_owner, keys_changed, verifiers)
                 .unwrap()
         );
     }
@@ -543,7 +553,7 @@ mod tests {
         let verifiers: BTreeSet<Address> = BTreeSet::default();
         vp_host_env::set(vp_env);
         assert!(
-            validate_tx(&ctx(), tx_data, vp_owner, keys_changed, verifiers)
+            validate_tx(&CTX, tx_data, vp_owner, keys_changed, verifiers)
                 .unwrap()
         );
     }
@@ -597,7 +607,7 @@ mod tests {
                 vp_env.all_touched_storage_keys();
             let verifiers: BTreeSet<Address> = BTreeSet::default();
             vp_host_env::set(vp_env);
-            assert!(!validate_tx(&ctx(), tx_data, vp_owner, keys_changed, verifiers).unwrap());
+            assert!(!validate_tx(&CTX, tx_data, vp_owner, keys_changed, verifiers).unwrap());
         }
     }
 
@@ -642,7 +652,7 @@ mod tests {
             vp_env.all_touched_storage_keys();
             let verifiers: BTreeSet<Address> = BTreeSet::default();
             vp_host_env::set(vp_env);
-            assert!(validate_tx(&ctx(), tx_data, vp_owner, keys_changed, verifiers).unwrap());
+            assert!(validate_tx(&CTX, tx_data, vp_owner, keys_changed, verifiers).unwrap());
         }
     }
 
@@ -673,7 +683,7 @@ mod tests {
         let verifiers: BTreeSet<Address> = BTreeSet::default();
         vp_host_env::set(vp_env);
         assert!(
-            !validate_tx(&ctx(), tx_data, vp_owner, keys_changed, verifiers)
+            !validate_tx(&CTX, tx_data, vp_owner, keys_changed, verifiers)
                 .unwrap()
         );
     }
@@ -713,7 +723,7 @@ mod tests {
         let verifiers: BTreeSet<Address> = BTreeSet::default();
         vp_host_env::set(vp_env);
         assert!(
-            validate_tx(&ctx(), tx_data, vp_owner, keys_changed, verifiers)
+            validate_tx(&CTX, tx_data, vp_owner, keys_changed, verifiers)
                 .unwrap()
         );
     }
@@ -752,7 +762,7 @@ mod tests {
         let verifiers: BTreeSet<Address> = BTreeSet::default();
         vp_host_env::set(vp_env);
         assert!(
-            !validate_tx(&ctx(), tx_data, vp_owner, keys_changed, verifiers)
+            !validate_tx(&CTX, tx_data, vp_owner, keys_changed, verifiers)
                 .unwrap()
         );
     }
@@ -793,7 +803,7 @@ mod tests {
         let verifiers: BTreeSet<Address> = BTreeSet::default();
         vp_host_env::set(vp_env);
         assert!(
-            validate_tx(&ctx(), tx_data, vp_owner, keys_changed, verifiers)
+            validate_tx(&CTX, tx_data, vp_owner, keys_changed, verifiers)
                 .unwrap()
         );
     }
@@ -838,7 +848,7 @@ mod tests {
         let verifiers: BTreeSet<Address> = BTreeSet::default();
         vp_host_env::set(vp_env);
         assert!(
-            !validate_tx(&ctx(), tx_data, vp_owner, keys_changed, verifiers)
+            !validate_tx(&CTX, tx_data, vp_owner, keys_changed, verifiers)
                 .unwrap()
         );
     }
@@ -878,7 +888,7 @@ mod tests {
         let verifiers: BTreeSet<Address> = BTreeSet::default();
         vp_host_env::set(vp_env);
         assert!(
-            validate_tx(&ctx(), tx_data, vp_owner, keys_changed, verifiers)
+            validate_tx(&CTX, tx_data, vp_owner, keys_changed, verifiers)
                 .unwrap()
         );
     }

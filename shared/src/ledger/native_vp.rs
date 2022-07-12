@@ -10,6 +10,7 @@ use crate::ledger::storage::{Storage, StorageHasher};
 use crate::ledger::{storage, vp_env};
 use crate::proto::Tx;
 use crate::types::address::{Address, InternalAddress};
+use crate::types::hash::Hash;
 use crate::types::storage::{BlockHash, BlockHeight, Epoch, Key};
 use crate::vm::prefix_iter::PrefixIterators;
 use crate::vm::WasmCacheAccess;
@@ -260,7 +261,7 @@ where
     }
 
     fn eval(
-        &mut self,
+        &self,
         vp_code: Vec<u8>,
         input_data: Vec<u8>,
     ) -> Result<bool, Self::Error> {
@@ -279,6 +280,7 @@ where
             let mut iterators: PrefixIterators<'_, DB> =
                 PrefixIterators::default();
             let mut result_buffer: Option<Vec<u8>> = None;
+            let mut vp_wasm_cache = self.vp_wasm_cache.clone();
 
             let ctx = VpCtx::new(
                 self.address,
@@ -291,7 +293,7 @@ where
                 &mut result_buffer,
                 self.keys_changed,
                 &eval_runner,
-                &mut self.vp_wasm_cache,
+                &mut vp_wasm_cache,
             );
             match eval_runner.eval_native_result(ctx, vp_code, input_data) {
                 Ok(result) => Ok(result),
@@ -322,5 +324,9 @@ where
         sig: &crate::types::key::common::Signature,
     ) -> Result<bool, Self::Error> {
         Ok(self.tx.verify_sig(pk, sig).is_ok())
+    }
+
+    fn get_tx_code_hash(&self) -> Result<Hash, Self::Error> {
+        vp_env::get_tx_code_hash(&mut *self.gas_meter.borrow_mut(), self.tx)
     }
 }

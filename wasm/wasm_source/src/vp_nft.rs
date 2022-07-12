@@ -33,7 +33,7 @@ fn validate_tx(
         }
     });
 
-    Ok(vp_check && nft::vp(tx_data, &addr, &keys_changed, &verifiers))
+    Ok(vp_check && nft::vp(ctx, tx_data, &addr, &keys_changed, &verifiers)?)
 }
 
 #[cfg(test)]
@@ -86,7 +86,7 @@ mod tests {
         let verifiers: BTreeSet<Address> = vp_env.get_verifiers();
         vp_host_env::set(vp_env);
         assert!(
-            validate_tx(&ctx(), tx_data, nft_address, keys_changed, verifiers)
+            validate_tx(&CTX, tx_data, nft_address, keys_changed, verifiers)
                 .unwrap()
         );
     }
@@ -134,7 +134,7 @@ mod tests {
         vp_host_env::set(vp_env);
 
         assert!(
-            validate_tx(&ctx(), tx_data, nft_address, keys_changed, verifiers)
+            validate_tx(&CTX, tx_data, nft_address, keys_changed, verifiers)
                 .unwrap()
         );
     }
@@ -191,7 +191,7 @@ mod tests {
         vp_host_env::set(vp_env);
 
         assert!(
-            validate_tx(&ctx(), tx_data, nft_address, keys_changed, verifiers)
+            validate_tx(&CTX, tx_data, nft_address, keys_changed, verifiers)
                 .unwrap()
         );
     }
@@ -248,7 +248,7 @@ mod tests {
         vp_host_env::set(vp_env);
 
         assert!(
-            !validate_tx(&ctx(), tx_data, nft_address, keys_changed, verifiers)
+            !validate_tx(&CTX, tx_data, nft_address, keys_changed, verifiers)
                 .unwrap()
         );
     }
@@ -323,7 +323,7 @@ mod tests {
         vp_host_env::set(vp_env);
 
         assert!(
-            validate_tx(&ctx(), tx_data, nft_address, keys_changed, verifiers)
+            validate_tx(&CTX, tx_data, nft_address, keys_changed, verifiers)
                 .unwrap()
         );
     }
@@ -398,7 +398,7 @@ mod tests {
         vp_host_env::set(vp_env);
 
         assert!(
-            !validate_tx(&ctx(), tx_data, nft_address, keys_changed, verifiers)
+            !validate_tx(&CTX, tx_data, nft_address, keys_changed, verifiers)
                 .unwrap()
         );
     }
@@ -442,7 +442,7 @@ mod tests {
         vp_host_env::set(vp_env);
 
         assert!(
-            !validate_tx(&ctx(), tx_data, nft_address, keys_changed, verifiers)
+            !validate_tx(&CTX, tx_data, nft_address, keys_changed, verifiers)
                 .unwrap()
         );
     }

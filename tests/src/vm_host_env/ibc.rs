@@ -1,5 +1,5 @@
 use core::time::Duration;
-use std::collections::{BTreeSet, HashMap};
+use std::collections::HashMap;
 use std::str::FromStr;
 
 use anoma::ibc::applications::ics20_fungible_token_transfer::msgs::transfer::MsgTransfer;
@@ -87,7 +87,7 @@ impl<'a> TestIbcVp<'a> {
         self.ibc.validate_tx(
             tx_data,
             self.ibc.ctx.keys_changed,
-            &BTreeSet::new(),
+            self.ibc.ctx.verifiers,
         )
     }
 }
@@ -104,7 +104,7 @@ impl<'a> TestIbcTokenVp<'a> {
         self.token.validate_tx(
             tx_data,
             self.token.ctx.keys_changed,
-            &BTreeSet::new(),
+            self.token.ctx.verifiers,
         )
     }
 }

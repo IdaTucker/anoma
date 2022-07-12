@@ -5,12 +5,15 @@ pub mod vp {
     pub use anoma::types::key::*;
 
     use super::*;
-    use crate::imports::vp;
+    use crate::imports::vp::*;
 
     /// Get the public key associated with the given address. Panics if not
     /// found.
-    pub fn get(owner: &Address) -> Option<common::PublicKey> {
-        let key = pk_key(owner).to_string();
-        vp::read_pre(&key)
+    pub fn get(
+        ctx: &Ctx,
+        owner: &Address,
+    ) -> EnvResult<Option<common::PublicKey>> {
+        let key = pk_key(owner);
+        ctx.read_pre(&key)
     }
 }

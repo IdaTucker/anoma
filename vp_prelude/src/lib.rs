@@ -18,7 +18,7 @@ pub fn sha256(bytes: &[u8]) -> Hash {
 }
 
 pub fn is_tx_whitelisted(ctx: &Ctx) -> VpResult {
-    let tx_hash = get_tx_code_hash();
+    let tx_hash = ctx.get_tx_code_hash()?;
     let key = parameters::storage::get_tx_whitelist_storage_key();
     let whitelist: Vec<String> = ctx.read_pre(&key)?.unwrap_or_default();
     // if whitelist is empty, allow any transaction
